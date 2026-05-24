@@ -1,4 +1,5 @@
 import os
+import json
 import time
 import multiprocessing
 from multiprocessing import Pool
@@ -6,17 +7,28 @@ import pandas as pd
 from parser import parse_tdx_day_file, parse_tdx_gbbq_file, compute_forward_adjustment, sync_all_blocks
 from storage import save_to_parquet
 
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+DATA_STORE_DIR = os.path.join(CURRENT_DIR, "data")
+
 # -------------------------------------------------------------
+# 路径与配置管理 (代码与配置分离的 OCP 设计)
 # -------------------------------------------------------------
-# 路径配置：若通达信安装目录发生变化，仅需修改此处的 TDX_DIR 变量即可 (WSL 挂载绝对路径)
-# -------------------------------------------------------------
-TDX_DIR = "/mnt/e/Tools/tdx"
+TDX_DIR = "/mnt/e/Tools/tdx"  # 默认通达信路径
+CONFIG_PATH = os.path.join(CURRENT_DIR, "config.json")
+
+# 自动从本地的 config.json 配置文件中载入通达信路径，规避直接修改源代码
+if os.path.exists(CONFIG_PATH):
+    try:
+        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+            config = json.load(f)
+            if "tdx_dir" in config:
+                TDX_DIR = config["tdx_dir"]
+    except Exception as e:
+        print(f"⚠️ 警告: 载入 config.json 失败，将采用默认路径。错误: {e}")
+
 GBBQ_PATH = os.path.join(TDX_DIR, "T0002", "hq_cache", "gbbq")
 SH_LDAY_DIR = os.path.join(TDX_DIR, "vipdoc", "sh", "lday")
 SZ_LDAY_DIR = os.path.join(TDX_DIR, "vipdoc", "sz", "lday")
-
-CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
-DATA_STORE_DIR = os.path.join(CURRENT_DIR, "data")
 
 # 全局变量，子进程在 fork 后会自动继承它以避免庞大的序列化开销
 global_gbbq_df = None
