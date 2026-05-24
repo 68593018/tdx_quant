@@ -7,7 +7,8 @@ from parser import parse_tdx_day_file, parse_tdx_gbbq_file, compute_forward_adju
 from storage import save_to_parquet
 
 # -------------------------------------------------------------
-# 路径配置
+# -------------------------------------------------------------
+# 路径配置：若通达信安装目录发生变化，仅需修改此处的 TDX_DIR 变量即可 (WSL 挂载绝对路径)
 # -------------------------------------------------------------
 TDX_DIR = "/mnt/e/Tools/tdx"
 GBBQ_PATH = os.path.join(TDX_DIR, "T0002", "hq_cache", "gbbq")
