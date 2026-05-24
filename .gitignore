@@ -1,0 +1,17 @@
+# Quant Parquet Database ( bulky columns store )
+data/
+
+# Python Cache & Temp files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.ipynb_checkpoints/
+
+# IDE config files
+.vscode/
+.idea/
+
+# Local Generated Reports (optional to ignore, but usually kept locally)
+# breakout_report.md
