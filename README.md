@@ -99,12 +99,22 @@ python3 sync_market.py
   python3 query.py concept   # 列出全市场 269 个概念板块
   ```
 
-#### 🏆 步骤三：一键多线程 SQL 因子共振选股
-直接运行选股器，系统会利用你电脑的所有 CPU 核心在几秒内压榨式扫描千万级数据，并输出当天最抢眼的“共振突破股”：
-```bash
-python3 screener.py
-```
-选股完成后，会**自动在项目根目录下刷新并保存 [breakout_report.md](file:///home/liliiflora/work/wsl-agy-projects/tdx_quant/breakout_report.md)** 报告！
+#### 🏆 步骤三：动态配置驱动的多策略选股
+选股引擎采用先进的 **“SQL 配置驱动设计”**，完全实现了算法与源码的解耦：
+* **查看策略帮助与当前可用列表**：
+  ```bash
+  python3 screener.py -h
+  ```
+* **运行默认的“资金集聚概念共振突破策略”**：
+  ```bash
+  python3 screener.py resonance_breakout
+  ```
+  *运行后，系统会自动在项目根目录下生成并刷新专属的 `resonance_breakout_report.md` 报告！*
+* **运行“均线多头排列共振爆发策略”**（并发计算 MA5/10/20/60 均线及多头共振）：
+  ```bash
+  python3 screener.py ma_long_sequence
+  ```
+  *运行后，系统会自动在项目根目录下生成并刷新专属的 `ma_long_sequence_report.md` 选股报告，各策略报告互不覆盖！*
 
 ---
 
