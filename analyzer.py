@@ -169,6 +169,7 @@ def main():
         "limit_down": int(row_temp['limit_down'])
     }
     
+    flat_count = int(row_temp['flat_count'])
     rising_count = dist['limit_up'] + dist['p7_10'] + dist['p5_7'] + dist['p3_5'] + dist['p0_3']
     falling_count = dist['limit_down'] + dist['n7_10'] + dist['n5_7'] + dist['n3_5'] + dist['n0_3']
 
@@ -202,6 +203,7 @@ def main():
         "median_return": median_return,
         "rising_count": rising_count,
         "falling_count": falling_count,
+        "flat_count": flat_count,
         "dist": dist,
         "streak_counts": {str(k): v for k, v in sorted(streak_counts.items(), reverse=True)},
         "streaks": streaks_list,
@@ -225,7 +227,7 @@ def main():
     print("\n" + "=" * 80)
     print(f"                 📊 市场情绪大势战报 (交易日期: {trade_date_str})")
     print("=" * 80)
-    print(f"🔹 统计总数: {total_stocks} 只个股   |   上涨家数: {rising_count} 只   |   下跌家数: {falling_count} 只")
+    print(f"🔹 统计总数: {total_stocks} 只个股   |   上涨家数: {rising_count} 只   |   平盘家数: {flat_count} 只   |   下跌家数: {falling_count} 只")
     print(f"🔹 市场中位数涨幅: {temp_color}{median_return:+.2f}%{reset_color} (当前市场实际赚钱效应指标)")
     print(f"🔹 极限情绪指标: 涨停 {limit_up} 家   |   跌停 {limit_down} 家   |   涨跌比 (A/D): {rising_count / max(1, falling_count):.2f}")
     print("-" * 80)
@@ -277,6 +279,7 @@ def save_markdown_report(data):
 *   **市场温度**：{temp_color} (以全市场中位数涨幅计算)
 *   **市场中位数涨幅**：`{data['median_return']:+.2f}%` *(这是衡量全市场个股平均赚钱效能的黄金指针)*
 *   **上涨家数**：`{data['rising_count']}` 只 *(占比 {data['rising_count'] * 100.0 / data['total_stocks']:.1f}%)*
+*   **平盘家数**：`{data['flat_count']}` 只 *(占比 {data['flat_count'] * 100.0 / data['total_stocks']:.1f}%)*
 *   **下跌家数**：`{data['falling_count']}` 只 *(占比 {data['falling_count'] * 100.0 / data['total_stocks']:.1f}%)*
 *   **极限多空家数**：涨停 `{data['dist']['limit_up']}` 家 | 跌停 `{data['dist']['limit_down']}` 家
 
@@ -588,11 +591,15 @@ def generate_html_dashboard(data):
             <div class="kpi-value" id="dom-median-return">0.00%</div>
         </div>
         <div class="card-kpi">
-            <div class="kpi-title">上涨家数 (多头家数)</div>
+            <div class="kpi-title">上涨家数 (多头)</div>
             <div class="kpi-value up" id="dom-rising-count">-- 只</div>
         </div>
         <div class="card-kpi">
-            <div class="kpi-title">下跌家数 (空头家数)</div>
+            <div class="kpi-title">平盘家数 (震荡)</div>
+            <div class="kpi-value" id="dom-flat-count" style="color: var(--text-muted);">-- 只</div>
+        </div>
+        <div class="card-kpi">
+            <div class="kpi-title">下跌家数 (空头)</div>
             <div class="kpi-value down" id="dom-falling-count">-- 只</div>
         </div>
         <div class="card-kpi">
@@ -669,6 +676,7 @@ def generate_html_dashboard(data):
         domMedian.className = "kpi-value " + (medianVal >= 0 ? "up" : "down");
         
         document.getElementById("dom-rising-count").innerText = MARKET_DATA.rising_count + " 只";
+        document.getElementById("dom-flat-count").innerText = MARKET_DATA.flat_count + " 只";
         document.getElementById("dom-falling-count").innerText = MARKET_DATA.falling_count + " 只";
         document.getElementById("dom-limit-ratio").innerText = MARKET_DATA.dist.limit_up + " / " + MARKET_DATA.dist.limit_down;
 
