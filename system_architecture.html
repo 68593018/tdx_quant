@@ -1,0 +1,820 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>通达信极速多因子量化选股系统 - 系统架构说明书</title>
+    <!-- 引入 premium Google 字体 -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+    
+    <!-- 引入 Mermaid.js 渲染引擎 -->
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10.2.4/dist/mermaid.min.js"></script>
+    
+    <style>
+        /* -------------------------------------------------------------
+         * 极奢黑暗美学设计系统 (Dark Theme System)
+         * ------------------------------------------------------------- */
+        :root {
+            --bg-base: #080c14;
+            --bg-surface: rgba(13, 20, 35, 0.7);
+            --bg-card: rgba(20, 30, 55, 0.45);
+            --border-glow: rgba(6, 182, 212, 0.15);
+            --border-subtle: rgba(255, 255, 255, 0.06);
+            --primary: #06b6d4;      /* 赛博霓虹青 */
+            --secondary: #6366f1;    /* 幻彩极光蓝 */
+            --accent: #a855f7;       /* 赛博朋克紫 */
+            --text-main: #f3f4f6;
+            --text-muted: #9ca3af;
+            --sidebar-width: 280px;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Inter', 'Outfit', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: var(--bg-base);
+            color: var(--text-main);
+            line-height: 1.6;
+            display: flex;
+            overflow-x: hidden;
+            background-image: 
+                radial-gradient(at 0% 0%, rgba(6, 182, 212, 0.05) 0px, transparent 50%),
+                radial-gradient(at 50% 100%, rgba(99, 102, 241, 0.05) 0px, transparent 50%);
+        }
+
+        /* -------------------------------------------------------------
+         * 侧边栏导航 (Sidebar Navigation)
+         * ------------------------------------------------------------- */
+        .sidebar {
+            width: var(--sidebar-width);
+            height: 100vh;
+            background: rgba(8, 12, 20, 0.95);
+            border-right: 1px solid var(--border-subtle);
+            position: fixed;
+            left: 0;
+            top: 0;
+            padding: 2.5rem 1.5rem;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            z-index: 100;
+        }
+
+        .logo-area {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            margin-bottom: 3rem;
+        }
+
+        .logo-icon {
+            width: 40px;
+            height: 40px;
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 0 20px rgba(6, 182, 212, 0.4);
+        }
+
+        .logo-icon svg {
+            width: 22px;
+            height: 22px;
+            fill: #fff;
+        }
+
+        .logo-text {
+            font-family: 'Outfit', sans-serif;
+            font-weight: 700;
+            font-size: 1.25rem;
+            letter-spacing: 0.5px;
+            background: linear-gradient(to right, #fff, #9ca3af);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .nav-list {
+            list-style: none;
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+            flex-grow: 1;
+        }
+
+        .nav-item a {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            color: var(--text-muted);
+            text-decoration: none;
+            padding: 0.85rem 1rem;
+            border-radius: 10px;
+            font-size: 0.95rem;
+            font-weight: 500;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            border: 1px solid transparent;
+        }
+
+        .nav-item a:hover, .nav-item.active a {
+            color: #fff;
+            background: rgba(255, 255, 255, 0.03);
+            border-color: rgba(6, 182, 212, 0.15);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        }
+
+        .nav-item a::before {
+            content: '';
+            width: 6px;
+            height: 6px;
+            background: var(--text-muted);
+            border-radius: 50%;
+            transition: all 0.3s ease;
+        }
+
+        .nav-item a:hover::before, .nav-item.active a::before {
+            background: var(--primary);
+            box-shadow: 0 0 8px var(--primary);
+            transform: scale(1.3);
+        }
+
+        .sidebar-footer {
+            font-size: 0.8rem;
+            color: rgba(255, 255, 255, 0.3);
+            border-top: 1px solid var(--border-subtle);
+            padding-top: 1.5rem;
+            text-align: center;
+        }
+
+        /* -------------------------------------------------------------
+         * 主内容区域 (Main Content Area)
+         * ------------------------------------------------------------- */
+        .main-content {
+            margin-left: var(--sidebar-width);
+            flex-grow: 1;
+            padding: 3rem 4rem;
+            max-width: 1400px;
+            min-height: 100vh;
+        }
+
+        header {
+            margin-bottom: 4rem;
+            position: relative;
+        }
+
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            background: rgba(6, 182, 212, 0.1);
+            border: 1px solid rgba(6, 182, 212, 0.2);
+            color: var(--primary);
+            padding: 0.35rem 1rem;
+            border-radius: 100px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            margin-bottom: 1.25rem;
+            box-shadow: 0 0 15px rgba(6, 182, 212, 0.1);
+        }
+
+        h1 {
+            font-family: 'Outfit', sans-serif;
+            font-size: 2.75rem;
+            font-weight: 700;
+            line-height: 1.2;
+            letter-spacing: -0.5px;
+            background: linear-gradient(135deg, #ffffff 40%, #a5b4fc 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 1rem;
+        }
+
+        .lead {
+            font-size: 1.15rem;
+            color: var(--text-muted);
+            max-width: 800px;
+        }
+
+        /* 👑 豪华玻璃态提示框 */
+        .glass-note {
+            background: linear-gradient(135deg, rgba(6, 182, 212, 0.05), rgba(99, 102, 241, 0.05));
+            border: 1px solid rgba(6, 182, 212, 0.15);
+            backdrop-filter: blur(10px);
+            padding: 1.5rem 2rem;
+            border-radius: 16px;
+            margin-bottom: 4rem;
+            display: flex;
+            gap: 1.25rem;
+            align-items: center;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+        }
+
+        .glass-note-icon {
+            font-size: 1.75rem;
+            filter: drop-shadow(0 0 10px var(--primary));
+        }
+
+        .glass-note-text {
+            font-size: 0.95rem;
+            color: var(--text-main);
+        }
+
+        /* -------------------------------------------------------------
+         * 模块及卡片排版 (Sections & Cards Layout)
+         * ------------------------------------------------------------- */
+        .section-anchor {
+            padding-top: 5rem;
+            margin-top: -3rem;
+        }
+
+        section {
+            margin-bottom: 6rem;
+        }
+
+        h2 {
+            font-family: 'Outfit', sans-serif;
+            font-size: 1.85rem;
+            font-weight: 600;
+            margin-bottom: 2rem;
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            border-bottom: 1px solid var(--border-subtle);
+            padding-bottom: 0.75rem;
+        }
+
+        h2::before {
+            content: '';
+            width: 4px;
+            height: 24px;
+            background: linear-gradient(to bottom, var(--primary), var(--secondary));
+            border-radius: 4px;
+        }
+
+        .grid-tech {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 3rem;
+        }
+
+        .card-tech {
+            background: var(--bg-surface);
+            border: 1px solid var(--border-subtle);
+            border-radius: 16px;
+            padding: 2rem;
+            transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .card-tech::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(135deg, transparent 90%, rgba(6, 182, 212, 0.08) 100%);
+            transition: all 0.4s ease;
+        }
+
+        .card-tech:hover {
+            transform: translateY(-5px);
+            border-color: rgba(6, 182, 212, 0.25);
+            box-shadow: 0 12px 30px rgba(6, 182, 212, 0.08);
+        }
+
+        .card-tech-title {
+            font-family: 'Outfit', sans-serif;
+            font-size: 1.15rem;
+            font-weight: 600;
+            margin-bottom: 0.75rem;
+            color: #fff;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .card-tech-desc {
+            font-size: 0.9rem;
+            color: var(--text-muted);
+        }
+
+        /* 🎨 Mermaid 极致大图可滚动容器 */
+        .diagram-container {
+            background: var(--bg-surface);
+            border: 1px solid var(--border-subtle);
+            border-radius: 20px;
+            padding: 2.5rem 1.5rem;
+            margin-bottom: 2rem;
+            overflow-x: auto; /* 核心：激活横向滚动条，防止强制缩放变小 */
+            position: relative;
+            box-shadow: inset 0 0 40px rgba(0, 0, 0, 0.4);
+        }
+
+        /* 🚀 极其精美的赛博朋克横向滚动条样式 */
+        .diagram-container::-webkit-scrollbar {
+            height: 6px;
+        }
+        .diagram-container::-webkit-scrollbar-track {
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 10px;
+        }
+        .diagram-container::-webkit-scrollbar-thumb {
+            background: rgba(6, 182, 212, 0.35); /* 青色半透明发光 */
+            border-radius: 10px;
+            transition: background 0.3s ease;
+        }
+        .diagram-container::-webkit-scrollbar-thumb:hover {
+            background: var(--primary);
+            box-shadow: 0 0 10px var(--primary);
+        }
+
+        /* 强制定义合理的渲染视区，杜绝 Mermaid 的缩小乱缩现象 */
+        .mermaid-wrapper {
+            min-width: 1100px; /* 强制整体架构图至少拥有 1100px 的展开宽度，以确保高分辨率和完美比例 */
+            padding: 1rem 0;
+            display: flex;
+            justify-content: center;
+        }
+
+        .mermaid-wrapper-seq {
+            min-width: 1300px; /* 强制6列的时序图至少拥有 1300px 的展开宽度，文字和线条绝不重叠 */
+            padding: 1rem 0;
+            display: flex;
+            justify-content: center;
+        }
+
+        .mermaid {
+            width: 100%;
+            display: flex;
+            justify-content: center;
+        }
+
+        /* 覆盖 Mermaid 生成的 SVG 尺寸，使其以最完美比例自然铺满 */
+        .mermaid svg {
+            width: 100% !important;
+            max-width: 100% !important;
+            height: auto !important;
+        }
+
+        .diagram-container::after {
+            content: '↔️ 横向滚动鼠标或触控板查看超清原比例架构图';
+            position: absolute;
+            bottom: 12px;
+            left: 20px;
+            font-size: 0.7rem;
+            font-family: 'Inter', sans-serif;
+            color: rgba(6, 182, 212, 0.4);
+            letter-spacing: 0.5px;
+        }
+
+        /* ⚙️ 核心模块深度解剖 */
+        .module-list {
+            display: flex;
+            flex-direction: column;
+            gap: 2rem;
+        }
+
+        .module-item {
+            background: var(--bg-surface);
+            border: 1px solid var(--border-subtle);
+            border-radius: 16px;
+            padding: 2.5rem;
+            transition: all 0.3s ease;
+        }
+
+        .module-item:hover {
+            border-color: rgba(99, 102, 241, 0.2);
+            box-shadow: 0 10px 35px rgba(0, 0, 0, 0.3);
+        }
+
+        .module-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1.25rem;
+        }
+
+        .module-num-title {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .module-number {
+            width: 32px;
+            height: 32px;
+            background: linear-gradient(135deg, var(--secondary), var(--accent));
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.9rem;
+            font-weight: 700;
+            font-family: 'Outfit', sans-serif;
+            color: #fff;
+            box-shadow: 0 0 15px rgba(99, 102, 241, 0.3);
+        }
+
+        .module-title {
+            font-family: 'Outfit', sans-serif;
+            font-size: 1.35rem;
+            font-weight: 600;
+            color: #fff;
+        }
+
+        .module-path {
+            font-family: 'Fira Code', monospace;
+            font-size: 0.85rem;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            color: var(--primary);
+            padding: 0.25rem 0.75rem;
+            border-radius: 6px;
+        }
+
+        .module-body {
+            color: var(--text-muted);
+            font-size: 0.95rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .module-features {
+            list-style: none;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            gap: 0.85rem;
+        }
+
+        .module-feature-li {
+            display: flex;
+            align-items: flex-start;
+            gap: 0.75rem;
+            font-size: 0.9rem;
+            color: #d1d5db;
+        }
+
+        .module-feature-li::before {
+            content: '✦';
+            color: var(--primary);
+            font-weight: bold;
+            text-shadow: 0 0 8px var(--primary);
+        }
+
+        /* 💡 滚动条定制 */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: var(--bg-base);
+        }
+        ::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--primary);
+        }
+
+        /* Responsive */
+        @media (max-width: 1024px) {
+            .sidebar {
+                display: none;
+            }
+            .main-content {
+                margin-left: 0;
+                padding: 2rem;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- -------------------------------------------------------------
+     * 侧边栏导航 
+     * ------------------------------------------------------------- -->
+    <nav class="sidebar">
+        <div>
+            <div class="logo-area">
+                <div class="logo-icon">
+                    <svg viewBox="0 0 24 24">
+                        <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17h-2v-2h2v2zm2.07-7.75l-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H7c0-2.76 2.24-5 5-5s5 2.24 5 5c0 1.04-.42 1.99-1.07 2.75z"/>
+                    </svg>
+                </div>
+                <span class="logo-text">TDX QUANT</span>
+            </div>
+            <ul class="nav-list">
+                <li class="nav-item active" id="nav-sec1"><a href="#sec1">核心技术栈</a></li>
+                <li class="nav-item" id="nav-sec2"><a href="#sec2">系统整体架构</a></li>
+                <li class="nav-item" id="nav-sec3"><a href="#sec3">核心模块剖析</a></li>
+                <li class="nav-item" id="nav-sec4"><a href="#sec4">数据时序流向</a></li>
+            </ul>
+        </div>
+        <div class="sidebar-footer">
+            通达信极速量化系统 v2.5
+        </div>
+    </nav>
+
+    <!-- -------------------------------------------------------------
+     * 主内容区域 
+     * ------------------------------------------------------------- -->
+    <main class="main-content">
+        <header>
+            <div class="badge">Architecture blueprint</div>
+            <h1>🚀 通达信本地二进制日K线极速选股系统</h1>
+            <div class="lead">全链路本地化、高并发清洗、Parquet 列式固化、DuckDB 亚秒级多线程选股火控系统整体设计方案与系统架构说明书。</div>
+        </header>
+
+        <!-- 👑 极致体验提示框 -->
+        <div class="glass-note">
+            <span class="glass-note-icon">💡</span>
+            <span class="glass-note-text">
+                <strong>温馨提示：</strong>此网页集成了高能 <strong>Mermaid.js 客户端实时浏览器渲染引擎</strong>。
+                图表采用 100% 极简标准语法，直接在您的浏览器内存中动态绘制并进行 SVG 矢量对齐，免除了任何 Markdown 预览插件导致的黑屏与崩溃。
+            </span>
+        </div>
+
+        <!-- -------------------------------------------------------------
+         * 第一部分：核心技术栈 
+         * ------------------------------------------------------------- -->
+        <section id="sec1" class="section-anchor">
+            <h2>🛠️ 一、 核心技术栈 (Technology Stack)</h2>
+            <div class="grid-tech">
+                <div class="card-tech">
+                    <div class="card-tech-title">💾 数据源底座</div>
+                    <div class="card-tech-desc">直接挂载读取 Windows 物理级本地通达信二进制文件 (.day/gbbq/block)，零网络延迟，零数据成本。</div>
+                </div>
+                <div class="card-tech">
+                    <div class="card-tech-title">⚡ 极速清洗层</div>
+                    <div class="card-tech-desc">Python 3.10 + NumPy C语言级别内存结构体直接映射。解析单股 20 年历史日K线仅需 <strong>1毫秒</strong>。</div>
+                </div>
+                <div class="card-tech">
+                    <div class="card-tech-title">🚀 并行同步池</div>
+                    <div class="card-tech-desc">基于 Fork-safe 内存初始化的高吞吐多进程 Pool。20秒内毫秒级完成全市场 9,187 个标的修改时间增量比对。</div>
+                </div>
+                <div class="card-tech">
+                    <div class="card-tech-title">💎 列式存储底座</div>
+                    <div class="card-tech-desc">Apache Parquet + Snappy 高速压缩列式固化。支持“列投影”及毫秒级瞬间提取，相较原始数据节省 60% 空间。</div>
+                </div>
+                <div class="card-tech">
+                    <div class="card-tech-title">🔥 内存火控选股</div>
+                    <div class="card-tech-desc">DuckDB 多线程分析型引擎。解耦策略，利用窗口函数与 JOIN 在 <strong>6秒左右</strong> 运算全市场千万行因子。</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- -------------------------------------------------------------
+         * 第二部分：整体架构流程图 
+         * ------------------------------------------------------------- -->
+        <section id="sec2" class="section-anchor">
+            <h2>🗺️ 二、 系统整体架构图 (System Architecture)</h2>
+            <div class="diagram-container">
+                <div class="mermaid-wrapper">
+                    <div class="mermaid">
+graph TB
+    subgraph Stage1 [阶段一 通达信本地源]
+        day_src[SH/SZ/BJ .day 二进制日K线 定长32字节]
+        gbbq_src[gbbq 加密复权事件库 Feistel XOR混淆]
+        block_src[block 二进制板块文件 定长2813字节]
+    end
+
+    subgraph Stage2 [阶段二 极速清洗管道 sync_market.py]
+        gbbq_dec[gbbq.py 解密模块 4176字节秘钥解密]
+        mtime_chk[增量 mtime 比对引擎 毫秒级比对]
+        multi_pool[多进程计算 Pool 满载 CPU 多核并行]
+        block_dec[block.py 二进制板块解算]
+    end
+
+    subgraph Stage3 [阶段三 Parquet 列式存储底座]
+        kline_pq[data sh sz parquet 单股物理文件]
+        block_pq[data block_mappings.parquet 7.3万条映射记录]
+    end
+
+    subgraph Stage4 [阶段四 DuckDB 选股火控 screener.py]
+        strat_json[strategies.json 策略规则库]
+        duck_engine[DuckDB 内存列式引擎 多线程并行]
+        sql_window[Window Functions 并行计算 MA 动态计算]
+        breadth_join[自下而上资金集聚 JOIN 共振过滤]
+    end
+
+    subgraph Stage5 [阶段五 终端与报告展现]
+        terminal_out[控制台高颜值选股战报 折行分栏排版]
+        report_md[strategy_report.md 自动生成 Markdown 选股报告]
+    end
+
+    gbbq_src -->|1 动态加载| gbbq_dec
+    day_src -->|2 比对修改时间| mtime_chk
+    gbbq_dec -->|3 共享 GBBQ 内存DataFrame| multi_pool
+    mtime_chk -->|4 分发待更新标的| multi_pool
+    multi_pool -->|5 写入前复权 K线价格与成交量| kline_pq
+    
+    block_src -->|6 动态对齐解析| block_dec
+    block_dec -->|7 合并输出多维映射表| block_pq
+
+    strat_json -->|8 读取选股 SQL 规则| duck_engine
+    kline_pq -->|9 直接映射扫描| duck_engine
+    block_pq -->|10 关联个股与板块| duck_engine
+    
+    duck_engine -->|11 并行窗口函数| sql_window
+    sql_window -->|12 资金宽度统计| breadth_join
+    breadth_join -->|13 格式化输出| terminal_out
+    breadth_join -->|14 自动写回报告| report_md
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- -------------------------------------------------------------
+         * 第三部分：核心模块剖析 
+         * ------------------------------------------------------------- -->
+        <section id="sec3" class="section-anchor">
+            <h2>⚙️ 三、 核心模块深度解剖 (Core Modules)</h2>
+            <div class="module-list">
+                <div class="module-item">
+                    <div class="module-header">
+                        <div class="module-num-title">
+                            <span class="module-number">01</span>
+                            <span class="module-title">数据解析与前复权计算层</span>
+                        </div>
+                        <span class="module-path">parser/</span>
+                    </div>
+                    <div class="module-body">
+                        本层是量化系统的“数字前线”，负责剥离和解算通达信的物理混淆，提供纯净的结构化数据。
+                    </div>
+                    <ul class="module-features">
+                        <li class="module-feature-li"><strong>K线解析 (kline.py)</strong>：使用 NumPy `fromfile` 搭配 32 字节定长 C 结构体映射，彻底规避 Python 的循环开销。</li>
+                        <li class="module-feature-li"><strong>GBBQ解密 (gbbq.py)</strong>：采用 16 轮循环 XOR 异或密码网络，破解出除权除息及送转明文数据。</li>
+                        <li class="module-feature-li"><strong>前复权计算 (adjuster.py)</strong>：自后向前修正价格，且<strong>同步修正成交量(Volume)</strong>保证 Close * Volume = Amount 金融守恒。</li>
+                        <li class="module-feature-li"><strong>板块解算 (block.py)</strong>：精准破解概念、风格及指数板块的 2813 字节定长块结构，输出多维映射表。</li>
+                    </ul>
+                </div>
+
+                <div class="module-item">
+                    <div class="module-header">
+                        <div class="module-num-title">
+                            <span class="module-number">02</span>
+                            <span class="module-title">高持久化列式存储层</span>
+                        </div>
+                        <span class="module-path">storage/</span>
+                    </div>
+                    <div class="module-body">
+                        解决高频大体量回测的持久化和读写瓶颈，是系统的本地高性能数据缓存。
+                    </div>
+                    <ul class="module-features">
+                        <li class="module-feature-li"><strong>物理文件隔离 (parquet_store.py)</strong>：单股独立物理文件，支持仅读取所需时间序列。</li>
+                        <li class="module-feature-li"><strong>Snappy 列投影加速</strong>：由于采用了高性能的 Apache Parquet 格式，选股时仅需投影 Date 和 Close 列，I/O 吞吐提升 10 倍以上。</li>
+                        <li class="module-feature-li"><strong>板块对照表</strong>：将全市场 7.3 万条个股与板块的映射以 Parquet 形式固化，支持毫秒级关联查询。</li>
+                    </ul>
+                </div>
+
+                <div class="module-item">
+                    <div class="module-header">
+                        <div class="module-num-title">
+                            <span class="module-number">03</span>
+                            <span class="module-title">多进程增量同步引擎</span>
+                        </div>
+                        <span class="module-path">sync_market.py</span>
+                    </div>
+                    <div class="module-body">
+                        量化数据新鲜度的保障引擎。通过底层极速调度，秒级一键同步全市场标的。
+                    </div>
+                    <ul class="module-features">
+                        <li class="module-feature-li"><strong>增量 mtime 毫秒级比对</strong>：通过秒级比对源文件与 Parquet 的修改时间，只同步有变动的标的，全同步时间从数分钟暴省至20秒。</li>
+                        <li class="module-feature-li"><strong>Fork-Safe 共享内存优化</strong>：子进程初始化器直接读取预解密 GBBQ DataFrame 的内存地址，消除了数十万条数据在进程间的序列化/进程通信开销。</li>
+                    </ul>
+                </div>
+
+                <div class="module-item">
+                    <div class="module-header">
+                        <div class="module-num-title">
+                            <span class="module-number">04</span>
+                            <span class="module-title">解耦式极速 SQL 选股引擎</span>
+                        </div>
+                        <span class="module-path">screener.py &amp; strategies.json</span>
+                    </div>
+                    <div class="module-body">
+                        整个量化系统的决策大脑，负责以多线程高并发状态在秒级对全市场进行因子分析与战术股筛选。
+                    </div>
+                    <ul class="module-features">
+                        <li class="module-feature-li"><strong>代码与算法配置分离</strong>：策略因子公式与 SQL 计算模板完全存放在 strategies.json 中，新增或修改策略<strong>完全无需改动 Python 源码</strong>。</li>
+                        <li class="module-feature-li"><strong>自下而上资金宽度策略 (Sector Breadth)</strong>：SQL 窗口函数极速在内存中统计并计算当天站上 MA20 且温和放量突破的个股占所属概念板块的总比重，精准剔除无板块合力的冷门庄股。</li>
+                        <li class="module-feature-li"><strong>报告物理隔离</strong>：各策略独立输出 `{strategy}_report.md` 报告，完全互不干扰。</li>
+                    </ul>
+                </div>
+            </div>
+        </section>
+
+        <!-- -------------------------------------------------------------
+         * 第四部分：极速同步与 SQL 选股数据流向图 
+         * ------------------------------------------------------------- -->
+        <section id="sec4" class="section-anchor">
+            <h2>🔁 四、 极速同步与 SQL 选股数据流向图 (Data Flow Sequence)</h2>
+            <div class="diagram-container">
+                <div class="mermaid-wrapper-seq">
+                    <div class="mermaid">
+sequenceDiagram
+    autonumber
+    actor User as 量化交易员
+    participant Sync as sync_market.py 清洗引擎
+    participant Local as 通达信本地二进制源
+    participant DB as Parquet数据底座
+    participant Screener as screener.py 选股器
+    participant Strategies as strategies.json 策略库
+    participant Report as 选股报告与战报
+
+    User->>Sync: 执行 python3 sync_market.py
+    Sync->>Local: 读取 GBBQ 二进制文件
+    Local-->>Sync: 返回 GBBQ 加密字节流
+    Sync->>Sync: 16轮 Feistel XOR 极速解密
+    Sync->>Local: 毫秒级比对 .day 文件修改时间 mtime
+    Local-->>Sync: 过滤出有更新的股票列表
+    Sync->>Sync: 共享 GBBQ DataFrame 至多进程计算池
+    Sync->>Local: 分块并行加载股票 .day 二进制文件
+    Sync->>Sync: 极速自后向前累积前复权价格与成交量
+    Sync->>DB: 并行写入或更新 sh sz parquet 文件
+    Sync->>Local: 对齐解析 2813 字节定长 block_gn.dat
+    Sync->>DB: 输出映射表 block_mappings.parquet
+    Sync-->>User: 报告同步完成 消耗20-30秒
+
+    User->>Screener: 执行 python3 screener.py resonance_breakout
+    Screener->>Strategies: 读取选股策略规则与 SQL 模板
+    Strategies-->>Screener: 返回对应策略 of SQL 模板
+    Screener->>DB: DuckDB 建立外部 Parquet 视图直接投影扫描
+    Screener->>Screener: 开启多线程并行窗口函数计算 MA20 与 MA60
+    Screener->>Screener: 自下而上板块资金宽度 Sector Breadth JOIN 过滤
+    Screener->>Report: 格式化高颜值终端输出
+    Screener->>Report: 自动写回 resonance_breakout_report.md
+    Report-->>User: 完美展现板块轮动与共振龙头股
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- -------------------------------------------------------------
+     * JS 交互与高光动态导航 
+     * ------------------------------------------------------------- -->
+    <script>
+        // 1. 初始化 Mermaid - 关闭 useMaxWidth，锁定完美比例，放大字体至最易读状态
+        mermaid.initialize({
+            startOnLoad: true,
+            theme: 'dark',
+            themeVariables: {
+                background: '#0d1423',
+                primaryColor: '#1e293b',
+                primaryTextColor: '#f3f4f6',
+                primaryBorderColor: '#334155',
+                lineColor: '#06b6d4',
+                secondaryColor: '#0a0f1d',
+                tertiaryColor: '#1e293b',
+                fontSize: '15px',                /* 放大字体至 15px 极佳易读状态 */
+                fontFamily: 'Inter, Outfit, -apple-system, sans-serif'
+            },
+            flowchart: {
+                useMaxWidth: false,             /* 禁止缩放挤压流程图 */
+                htmlLabels: true,
+                curve: 'basis'
+            },
+            sequence: {
+                useMaxWidth: false,             /* 禁止缩放挤压时序图 */
+                width: 1300,
+                height: 700,
+                boxMargin: 15,
+                messageMargin: 40
+            }
+        });
+
+        // 2. 侧边栏高光高亮跟随滚动 (Scrollspy)
+        const sections = document.querySelectorAll('section');
+        const navItems = document.querySelectorAll('.nav-item');
+
+        window.addEventListener('scroll', () => {
+            let current = '';
+            sections.forEach(section => {
+                const sectionTop = section.offsetTop;
+                const sectionHeight = section.clientHeight;
+                if (pageYOffset >= (sectionTop - 300)) {
+                    current = section.getAttribute('id');
+                }
+            });
+
+            navItems.forEach(item => {
+                item.classList.remove('active');
+                if (item.getAttribute('id') === `nav-${current}`) {
+                    item.classList.add('active');
+                }
+            });
+        });
+    </script>
+</body>
+</html>

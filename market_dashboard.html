@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>通达信极速多因子量化选股系统 - 全市场大势分析看板</title>
+    <!-- 引入 premium 字体与 ECharts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.2/dist/echarts.min.js"></script>
+    
+    <style>
+        :root {
+            --bg-base: #06090f;
+            --bg-surface: rgba(13, 20, 35, 0.7);
+            --bg-card: rgba(22, 32, 54, 0.45);
+            --border-subtle: rgba(255, 255, 255, 0.05);
+            --primary: #06b6d4;      /* 霓虹青 */
+            --secondary: #6366f1;    /* 极光蓝 */
+            --accent: #a855f7;       /* 朋克紫 */
+            --up-color: #ef4444;     /* 涨停红 */
+            --down-color: #10b981;   /* 跌停绿 */
+            --text-main: #f3f4f6;
+            --text-muted: #9ca3af;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, sans-serif;
+            background-color: var(--bg-base);
+            color: var(--text-main);
+            padding: 2.5rem 3.5rem;
+            min-height: 100vh;
+            background-image: 
+                radial-gradient(at 0% 0%, rgba(6, 182, 212, 0.04) 0px, transparent 50%),
+                radial-gradient(at 100% 100%, rgba(168, 85, 247, 0.04) 0px, transparent 50%);
+        }
+
+        /* Header section */
+        header {
+            margin-bottom: 2.5rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+            border-bottom: 1px solid var(--border-subtle);
+            padding-bottom: 1.5rem;
+        }
+
+        .logo-title {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .badge {
+            display: inline-flex;
+            background: rgba(6, 182, 212, 0.1);
+            border: 1px solid rgba(6, 182, 212, 0.2);
+            color: var(--primary);
+            padding: 0.25rem 0.75rem;
+            border-radius: 100px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            letter-spacing: 1px;
+            width: fit-content;
+        }
+
+        h1 {
+            font-family: 'Outfit', sans-serif;
+            font-size: 2.2rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, #ffffff 40%, #c7d2fe 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .trade-date {
+            font-family: 'Outfit', sans-serif;
+            font-size: 1.1rem;
+            color: var(--text-muted);
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid var(--border-subtle);
+            padding: 0.5rem 1.25rem;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .trade-date::before {
+            content: '📅';
+        }
+
+        /* 🌡️ 宏观情绪大盘排版 */
+        .grid-kpis {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 2.5rem;
+        }
+
+        .card-kpi {
+            background: var(--bg-surface);
+            border: 1px solid var(--border-subtle);
+            border-radius: 16px;
+            padding: 1.5rem 1.75rem;
+            position: relative;
+            overflow: hidden;
+            backdrop-filter: blur(10px);
+        }
+
+        .kpi-title {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            margin-bottom: 0.5rem;
+        }
+
+        .kpi-value {
+            font-family: 'Outfit', sans-serif;
+            font-size: 1.85rem;
+            font-weight: 700;
+        }
+
+        .kpi-value.up { color: var(--up-color); text-shadow: 0 0 10px rgba(239, 68, 68, 0.15); }
+        .kpi-value.down { color: var(--down-color); text-shadow: 0 0 10px rgba(16, 185, 129, 0.15); }
+
+        /* 📊 主仪表盘图表排列网格 */
+        .grid-dashboard {
+            display: grid;
+            grid-template-columns: 3fr 2fr;
+            gap: 2rem;
+            margin-bottom: 2.5rem;
+        }
+
+        @media (max-width: 1024px) {
+            .grid-dashboard {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .card-chart {
+            background: var(--bg-surface);
+            border: 1px solid var(--border-subtle);
+            border-radius: 20px;
+            padding: 2rem;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
+        }
+
+        .chart-title {
+            font-family: 'Outfit', sans-serif;
+            font-size: 1.25rem;
+            font-weight: 600;
+            margin-bottom: 1.5rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+            padding-bottom: 0.5rem;
+        }
+
+        .chart-box {
+            width: 100%;
+            height: 350px;
+        }
+
+        /* 📋 概念及板块连板表格与排版 */
+        .table-area {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .table-area th {
+            text-align: left;
+            padding: 0.75rem 1rem;
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .table-area td {
+            padding: 0.85rem 1rem;
+            font-size: 0.9rem;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.02);
+            color: var(--text-main);
+        }
+
+        .streak-badge {
+            background: linear-gradient(135deg, var(--accent), var(--secondary));
+            border-radius: 6px;
+            color: #fff;
+            font-family: 'Outfit', sans-serif;
+            font-weight: 700;
+            padding: 0.2rem 0.5rem;
+            font-size: 0.8rem;
+            box-shadow: 0 0 10px rgba(99, 102, 241, 0.3);
+        }
+
+        .progress-bar-bg {
+            width: 100px;
+            height: 6px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 10px;
+            display: inline-block;
+            vertical-align: middle;
+            margin-right: 0.5rem;
+            overflow: hidden;
+        }
+
+        .progress-bar-fill {
+            height: 100%;
+            background: linear-gradient(to right, var(--primary), var(--secondary));
+            border-radius: 10px;
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <div class="logo-title">
+            <div class="badge">TACTICAL MARKET DASHBOARD</div>
+            <h1>🚀 全市场大势与短线投机温度仪表盘</h1>
+        </div>
+        <div class="trade-date" id="dom-trade-date">---- -- --</div>
+    </header>
+
+    <!-- 🌡️ 全局 KPI 温度计 -->
+    <div class="grid-kpis">
+        <div class="card-kpi">
+            <div class="kpi-title">全市场中位数涨幅</div>
+            <div class="kpi-value" id="dom-median-return">0.00%</div>
+        </div>
+        <div class="card-kpi">
+            <div class="kpi-title">上涨家数 (多头家数)</div>
+            <div class="kpi-value up" id="dom-rising-count">-- 只</div>
+        </div>
+        <div class="card-kpi">
+            <div class="kpi-title">下跌家数 (空头家数)</div>
+            <div class="kpi-value down" id="dom-falling-count">-- 只</div>
+        </div>
+        <div class="card-kpi">
+            <div class="kpi-title">涨停 / 跌停家数</div>
+            <div class="kpi-value" id="dom-limit-ratio" style="background: linear-gradient(to right, var(--up-color), var(--down-color)); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">-- / --</div>
+        </div>
+    </div>
+
+    <!-- 📊 图表仪表盘网格 -->
+    <div class="grid-dashboard">
+        <!-- 涨跌幅分布 -->
+        <div class="card-chart">
+            <div class="chart-title">📊 沪深京全市场涨跌幅多维区间分布图</div>
+            <div class="chart-box" id="chart-distribution"></div>
+        </div>
+        
+        <!-- 上证指数筹码分布 -->
+        <div class="card-chart">
+            <div class="chart-title">🧱 上证指数筹码堆积带 (120日成交额压力支撑)</div>
+            <div class="chart-box" id="chart-index-support"></div>
+        </div>
+    </div>
+
+    <div class="grid-dashboard">
+        <!-- 板块宽度排行 -->
+        <div class="card-chart">
+            <div class="chart-title">🚀 概念板块均线多头占比排行 (前十强主线)</div>
+            <table class="table-area" id="table-sectors">
+                <thead>
+                    <tr>
+                        <th>板块名称</th>
+                        <th>成分股数</th>
+                        <th>中线多头排列比</th>
+                        <th>今日放量突破股</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <!-- JS 自动注入 -->
+                </tbody>
+            </table>
+        </div>
+
+        <!-- 短线连板梯队 -->
+        <div class="card-chart">
+            <div class="chart-title">🪜 最新活跃游资投机连板高度梯队</div>
+            <table class="table-area" id="table-streaks">
+                <thead>
+                    <tr>
+                        <th>连板天数</th>
+                        <th>连板股数 (只)</th>
+                        <th>热门连板个股列表</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <!-- JS 自动注入 -->
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- -------------------------------------------------------------
+     * 数据接收与前端逻辑 
+     * ------------------------------------------------------------- -->
+    <script>
+        // 动态注入的全局变量，绝对无 CORS 限制！
+        const MARKET_DATA = {"trade_date": "2026-05-25", "total_stocks": 7612, "median_return": -0.0557704008786179, "rising_count": 3748, "falling_count": 3864, "dist": {"limit_up": 174, "p7_10": 122, "p5_7": 251, "p3_5": 511, "p0_3": 2690, "n0_3": 3170, "n3_5": 502, "n5_7": 120, "n7_10": 39, "limit_down": 33}, "streak_counts": {"4": 1, "3": 1, "2": 22, "1": 79}, "streaks": [{"symbol": "SZ000518", "streak": 4}, {"symbol": "SH603661", "streak": 3}, {"symbol": "SH600172", "streak": 2}, {"symbol": "SH600186", "streak": 2}, {"symbol": "SH600234", "streak": 2}, {"symbol": "SH600462", "streak": 2}, {"symbol": "SH600503", "streak": 2}, {"symbol": "SH600539", "streak": 2}, {"symbol": "SH603001", "streak": 2}, {"symbol": "SH603256", "streak": 2}, {"symbol": "SH603663", "streak": 2}, {"symbol": "SH603936", "streak": 2}, {"symbol": "SH605580", "streak": 2}, {"symbol": "SZ000510", "streak": 2}, {"symbol": "SZ000636", "streak": 2}, {"symbol": "SZ002421", "streak": 2}, {"symbol": "SZ002432", "streak": 2}, {"symbol": "SZ002552", "streak": 2}, {"symbol": "SZ002585", "streak": 2}, {"symbol": "SZ002741", "streak": 2}, {"symbol": "SZ002897", "streak": 2}, {"symbol": "SZ002938", "streak": 2}, {"symbol": "SZ002975", "streak": 2}, {"symbol": "SZ002980", "streak": 2}, {"symbol": "SH600310", "streak": 1}, {"symbol": "SH600395", "streak": 1}, {"symbol": "SH600396", "streak": 1}, {"symbol": "SH600520", "streak": 1}, {"symbol": "SH600578", "streak": 1}, {"symbol": "SH600584", "streak": 1}, {"symbol": "SH600592", "streak": 1}, {"symbol": "SH600603", "streak": 1}, {"symbol": "SH600637", "streak": 1}, {"symbol": "SH600726", "streak": 1}, {"symbol": "SH600831", "streak": 1}, {"symbol": "SH600851", "streak": 1}, {"symbol": "SH600863", "streak": 1}, {"symbol": "SH600969", "streak": 1}, {"symbol": "SH600985", "streak": 1}, {"symbol": "SH600996", "streak": 1}, {"symbol": "SH601608", "streak": 1}, {"symbol": "SH601666", "streak": 1}, {"symbol": "SH603005", "streak": 1}, {"symbol": "SH603010", "streak": 1}, {"symbol": "SH603083", "streak": 1}, {"symbol": "SH603203", "streak": 1}, {"symbol": "SH603303", "streak": 1}, {"symbol": "SH603360", "streak": 1}, {"symbol": "SH603730", "streak": 1}, {"symbol": "SH603823", "streak": 1}, {"symbol": "SH603871", "streak": 1}, {"symbol": "SH603919", "streak": 1}, {"symbol": "SH603956", "streak": 1}, {"symbol": "SH603986", "streak": 1}, {"symbol": "SH603990", "streak": 1}, {"symbol": "SH605111", "streak": 1}, {"symbol": "SH605198", "streak": 1}, {"symbol": "SH605566", "streak": 1}, {"symbol": "SH605588", "streak": 1}, {"symbol": "SH688001", "streak": 1}, {"symbol": "SH688110", "streak": 1}, {"symbol": "SH688347", "streak": 1}, {"symbol": "SH688362", "streak": 1}, {"symbol": "SZ000409", "streak": 1}, {"symbol": "SZ000509", "streak": 1}, {"symbol": "SZ000875", "streak": 1}, {"symbol": "SZ000926", "streak": 1}, {"symbol": "SZ000966", "streak": 1}, {"symbol": "SZ000980", "streak": 1}, {"symbol": "SZ000988", "streak": 1}, {"symbol": "SZ000995", "streak": 1}, {"symbol": "SZ002012", "streak": 1}, {"symbol": "SZ002051", "streak": 1}, {"symbol": "SZ002056", "streak": 1}, {"symbol": "SZ002156", "streak": 1}, {"symbol": "SZ002185", "streak": 1}, {"symbol": "SZ002297", "streak": 1}, {"symbol": "SZ002388", "streak": 1}, {"symbol": "SZ002409", "streak": 1}, {"symbol": "SZ002438", "streak": 1}, {"symbol": "SZ002526", "streak": 1}, {"symbol": "SZ002613", "streak": 1}, {"symbol": "SZ002645", "streak": 1}, {"symbol": "SZ002674", "streak": 1}, {"symbol": "SZ002693", "streak": 1}, {"symbol": "SZ002718", "streak": 1}, {"symbol": "SZ002735", "streak": 1}, {"symbol": "SZ002745", "streak": 1}, {"symbol": "SZ002851", "streak": 1}, {"symbol": "SZ002927", "streak": 1}, {"symbol": "SZ002947", "streak": 1}, {"symbol": "SZ002951", "streak": 1}, {"symbol": "SZ002957", "streak": 1}, {"symbol": "SZ002976", "streak": 1}, {"symbol": "SZ003036", "streak": 1}, {"symbol": "SZ300196", "streak": 1}, {"symbol": "SZ300275", "streak": 1}, {"symbol": "SZ300626", "streak": 1}, {"symbol": "SZ300779", "streak": 1}, {"symbol": "SZ300835", "streak": 1}, {"symbol": "SZ300868", "streak": 1}, {"symbol": "SZ300939", "streak": 1}, {"symbol": "SZ300975", "streak": 1}], "breadth": [{"block_name": "玻璃基板", "total_stocks": 23, "above_ma20_count": 20, "above_ma20_ratio": 86.95652173913044, "bullish_count": 14, "bullish_ratio": 60.869565217391305, "breakout_count": 1}, {"block_name": "先进封装", "total_stocks": 162, "above_ma20_count": 145, "above_ma20_ratio": 89.50617283950618, "bullish_count": 94, "bullish_ratio": 58.02469135802469, "breakout_count": 10}, {"block_name": "存储芯片", "total_stocks": 185, "above_ma20_count": 155, "above_ma20_ratio": 83.78378378378379, "bullish_count": 92, "bullish_ratio": 49.729729729729726, "breakout_count": 9}, {"block_name": "PCB概念", "total_stocks": 195, "above_ma20_count": 159, "above_ma20_ratio": 81.53846153846153, "bullish_count": 96, "bullish_ratio": 49.23076923076923, "breakout_count": 19}, {"block_name": "汽车芯片", "total_stocks": 118, "above_ma20_count": 93, "above_ma20_ratio": 78.8135593220339, "bullish_count": 56, "bullish_ratio": 47.45762711864407, "breakout_count": 8}, {"block_name": "MiniLED", "total_stocks": 101, "above_ma20_count": 84, "above_ma20_ratio": 83.16831683168317, "bullish_count": 47, "bullish_ratio": 46.53465346534654, "breakout_count": 6}, {"block_name": "MCU芯片", "total_stocks": 88, "above_ma20_count": 67, "above_ma20_ratio": 76.13636363636364, "bullish_count": 39, "bullish_ratio": 44.31818181818182, "breakout_count": 8}, {"block_name": "光刻机", "total_stocks": 118, "above_ma20_count": 91, "above_ma20_ratio": 77.11864406779661, "bullish_count": 52, "bullish_ratio": 44.067796610169495, "breakout_count": 7}, {"block_name": "OLED概念", "total_stocks": 150, "above_ma20_count": 119, "above_ma20_ratio": 79.33333333333333, "bullish_count": 66, "bullish_ratio": 44.0, "breakout_count": 12}, {"block_name": "三代半导", "total_stocks": 164, "above_ma20_count": 130, "above_ma20_ratio": 79.26829268292683, "bullish_count": 72, "bullish_ratio": 43.90243902439025, "breakout_count": 11}, {"block_name": "MicroLED", "total_stocks": 75, "above_ma20_count": 61, "above_ma20_ratio": 81.33333333333333, "bullish_count": 31, "bullish_ratio": 41.333333333333336, "breakout_count": 6}, {"block_name": "EDA概念", "total_stocks": 17, "above_ma20_count": 12, "above_ma20_ratio": 70.58823529411765, "bullish_count": 7, "bullish_ratio": 41.1764705882353, "breakout_count": 3}, {"block_name": "苹果概念", "total_stocks": 144, "above_ma20_count": 107, "above_ma20_ratio": 74.30555555555556, "bullish_count": 58, "bullish_ratio": 40.27777777777778, "breakout_count": 11}, {"block_name": "折叠屏", "total_stocks": 115, "above_ma20_count": 79, "above_ma20_ratio": 68.69565217391305, "bullish_count": 46, "bullish_ratio": 40.0, "breakout_count": 6}, {"block_name": "AI手机PC", "total_stocks": 63, "above_ma20_count": 45, "above_ma20_ratio": 71.42857142857143, "bullish_count": 25, "bullish_ratio": 39.682539682539684, "breakout_count": 4}, {"block_name": "CPO概念", "total_stocks": 179, "above_ma20_count": 150, "above_ma20_ratio": 83.79888268156425, "bullish_count": 70, "bullish_ratio": 39.10614525139665, "breakout_count": 11}, {"block_name": "AI眼镜", "total_stocks": 180, "above_ma20_count": 135, "above_ma20_ratio": 75.0, "bullish_count": 70, "bullish_ratio": 38.888888888888886, "breakout_count": 15}, {"block_name": "培育钻石", "total_stocks": 17, "above_ma20_count": 12, "above_ma20_ratio": 70.58823529411765, "bullish_count": 6, "bullish_ratio": 35.294117647058826, "breakout_count": 3}, {"block_name": "复合铜箔", "total_stocks": 46, "above_ma20_count": 29, "above_ma20_ratio": 63.04347826086956, "bullish_count": 16, "bullish_ratio": 34.78260869565217, "breakout_count": 6}, {"block_name": "工业软件", "total_stocks": 35, "above_ma20_count": 21, "above_ma20_ratio": 60.0, "bullish_count": 12, "bullish_ratio": 34.285714285714285, "breakout_count": 4}], "support": [{"bucket": 0, "min_price": 3813.28, "max_price": 3836.77, "total_amount_billions": 33600.12632064}, {"bucket": 1, "min_price": 3864.18, "max_price": 3897.71, "total_amount_billions": 134245.531648}, {"bucket": 2, "min_price": 3900.5, "max_price": 3940.95, "total_amount_billions": 96431.68169984}, {"bucket": 3, "min_price": 3948.55, "max_price": 3968.84, "total_amount_billions": 70641.51195648}, {"bucket": 4, "min_price": 3986.22, "max_price": 4027.21, "total_amount_billions": 81427.31149312}, {"bucket": 5, "min_price": 4049.91, "max_price": 4067.74, "total_amount_billions": 58270.17048064}, {"bucket": 6, "min_price": 4075.92, "max_price": 4113.65, "total_amount_billions": 287488.55312384}, {"bucket": 7, "min_price": 4114.0, "max_price": 4152.57, "total_amount_billions": 311705.28411648}, {"bucket": 8, "min_price": 4157.98, "max_price": 4182.59, "total_amount_billions": 136705.27729664}, {"bucket": 9, "min_price": 4214.49, "max_price": 4242.57, "total_amount_billions": 44971.03388672}]};
+
+        // 1. 初始化头部与KPI数据
+        document.getElementById("dom-trade-date").innerText = MARKET_DATA.trade_date;
+        
+        const medianVal = MARKET_DATA.median_return;
+        const domMedian = document.getElementById("dom-median-return");
+        domMedian.innerText = (medianVal >= 0 ? "+" : "") + medianVal.toFixed(2) + "%";
+        domMedian.className = "kpi-value " + (medianVal >= 0 ? "up" : "down");
+        
+        document.getElementById("dom-rising-count").innerText = MARKET_DATA.rising_count + " 只";
+        document.getElementById("dom-falling-count").innerText = MARKET_DATA.falling_count + " 只";
+        document.getElementById("dom-limit-ratio").innerText = MARKET_DATA.dist.limit_up + " / " + MARKET_DATA.dist.limit_down;
+
+        // 2. 渲染全市场区间涨跌分布
+        const chartDist = echarts.init(document.getElementById("chart-distribution"));
+        const distData = MARKET_DATA.dist;
+        
+        const distOption = {
+            backgroundColor: 'transparent',
+            tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+            grid: { left: '3%', right: '3%', bottom: '3%', top: '10%', containLabel: true },
+            xAxis: {
+                type: 'category',
+                data: ['跌停(<-9.9%)', '-7%~-9.9%', '-5%~-7%', '-3%~-5%', '-3%~0%', '0%~3%', '3%~5%', '5%~7%', '7%~9.9%', '涨停(>9.9%)'],
+                axisLabel: { color: '#9ca3af', fontSize: 11 },
+                axisLine: { lineStyle: { color: 'rgba(255, 255, 255, 0.08)' } }
+            },
+            yAxis: {
+                type: 'value',
+                axisLabel: { color: '#9ca3af' },
+                splitLine: { lineStyle: { color: 'rgba(255, 255, 255, 0.03)' } }
+            },
+            series: [{
+                data: [
+                    { value: distData.limit_down, itemStyle: { color: '#10b981' } },
+                    { value: distData.n7_10, itemStyle: { color: '#34d399' } },
+                    { value: distData.n5_7, itemStyle: { color: '#6ee7b7' } },
+                    { value: distData.n3_5, itemStyle: { color: '#a7f3d0' } },
+                    { value: distData.n0_3, itemStyle: { color: '#d1fae5' } },
+                    { value: distData.p0_3, itemStyle: { color: '#fee2e2' } },
+                    { value: distData.p3_5, itemStyle: { color: '#fca5a5' } },
+                    { value: distData.p5_7, itemStyle: { color: '#f87171' } },
+                    { value: distData.p7_10, itemStyle: { color: '#f87171' } },
+                    { value: distData.limit_up, itemStyle: { color: '#ef4444' } }
+                ],
+                type: 'bar',
+                barWidth: '55%',
+                label: { show: true, position: 'top', color: '#f3f4f6', fontSize: 11 }
+            }]
+        };
+        chartDist.setOption(distOption);
+
+        // 3. 渲染上证指数筹码压力支撑分布
+        const chartSupport = echarts.init(document.getElementById("chart-index-support"));
+        const supportData = MARKET_DATA.support;
+        
+        const supportOption = {
+            backgroundColor: 'transparent',
+            tooltip: { trigger: 'axis', formatter: '区间: {b}<br/>历史成交额: {c} 亿元' },
+            grid: { left: '3%', right: '5%', bottom: '3%', top: '5%', containLabel: true },
+            xAxis: {
+                type: 'value',
+                axisLabel: { color: '#9ca3af' },
+                splitLine: { lineStyle: { color: 'rgba(255, 255, 255, 0.03)' } }
+            },
+            yAxis: {
+                type: 'category',
+                data: supportData.map(s => `${s.min_price.toFixed(0)}~${s.max_price.toFixed(0)}`),
+                axisLabel: { color: '#9ca3af', fontSize: 11 },
+                axisLine: { lineStyle: { color: 'rgba(255, 255, 255, 0.08)' } }
+            },
+            series: [{
+                data: supportData.map(s => s.total_amount_billions.toFixed(1)),
+                type: 'bar',
+                itemStyle: {
+                    color: new echarts.graphic.LinearGradient(0, 0, 1, 0, [
+                        { offset: 0, color: 'rgba(99, 102, 241, 0.3)' },
+                        { offset: 1, color: '#06b6d4' }
+                    ]),
+                    borderRadius: [0, 4, 4, 0]
+                },
+                label: { show: true, position: 'right', color: '#f3f4f6', formatter: '{c} 亿' }
+            }]
+        };
+        chartSupport.setOption(supportOption);
+
+        // 4. 填充概念板块多头动能表格 (Top 10)
+        const secTbody = document.querySelector("#table-sectors tbody");
+        MARKET_DATA.breadth.slice(0, 10).forEach(b => {
+            const tr = document.createElement("tr");
+            tr.innerHTML = `
+                <td><strong>${b.block_name}</strong></td>
+                <td>${b.total_stocks} 只</td>
+                <td>
+                    <div class="progress-bar-bg">
+                        <div class="progress-bar-fill" style="width: ${b.bullish_ratio}%"></div>
+                    </div>
+                    <strong>${b.bullish_ratio.toFixed(1)}%</strong>
+                </td>
+                <td><span style="color: var(--primary); font-weight: bold;">${b.breakout_count} 只</span></td>
+            `;
+            secTbody.appendChild(tr);
+        });
+
+        // 5. 填充短线连板情绪梯队表格
+        const streakTbody = document.querySelector("#table-streaks tbody");
+        
+        // 按 streak 分组
+        const streakGroups = {};
+        MARKET_DATA.streaks.forEach(s => {
+            streakGroups[s.streak] = streakGroups[s.streak] || [];
+            streakGroups[s.streak].push(s.symbol);
+        });
+        
+        const sortedStreaks = Object.keys(streakGroups).map(Number).sort((a,b) => b-a);
+        
+        if (sortedStreaks.length === 0) {
+            const tr = document.createElement("tr");
+            tr.innerHTML = `<td colspan="3" style="text-align: center; color: var(--text-muted); padding: 2rem;">当前短线冰点，无个股连板</td>`;
+            streakTbody.appendChild(tr);
+        } else {
+            sortedStreaks.forEach(streak => {
+                const tr = document.createElement("tr");
+                tr.innerHTML = `
+                    <td><span class="streak-badge">${streak} 连板</span></td>
+                    <td><strong>${streakGroups[streak].length} 只</strong></td>
+                    <td style="color: var(--primary);">${streakGroups[streak].join(", ")}</td>
+                `;
+                streakTbody.appendChild(tr);
+            });
+        }
+
+        // 6. 响应式布局自适应
+        window.addEventListener('resize', () => {
+            chartDist.resize();
+            chartSupport.resize();
+        });
+    </script>
+</body>
+</html>

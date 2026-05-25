@@ -15,3 +15,6 @@ __pycache__/
 
 # Local Generated Reports (optional to ignore, but usually kept locally)
 # breakout_report.md
+
+# Scratch Scripts & Files
+scratch/
