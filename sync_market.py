@@ -81,6 +81,60 @@ def sync_single_file(task_args):
     except Exception as e:
         return code, False, str(e)
 
+def sync_all_industries(tdx_dir: str, output_parquet_path: str):
+    """
+    Sync stock-to-industry classifications using tdxhy.cfg and incon.dat
+    """
+    incon_path = os.path.join(tdx_dir, "incon.dat")
+    hy_path = os.path.join(tdx_dir, "T0002", "hq_cache", "tdxhy.cfg")
+    
+    if not os.path.exists(incon_path) or not os.path.exists(hy_path):
+        print("⚠️ 警告: 行业配置文件不存在，跳过行业数据解析")
+        return None
+        
+    # 1. 解析 incon.dat
+    industry_names = {}
+    with open(incon_path, "rb") as f:
+        lines = f.read().decode("gbk", errors="ignore").splitlines()
+    
+    in_section = False
+    for line in lines:
+        line = line.strip()
+        if line == "#TDXNHY":
+            in_section = True
+            continue
+        elif line.startswith("#") and in_section:
+            in_section = False
+            continue
+        
+        if in_section and "|" in line:
+            code, name = line.split("|", 1)
+            if len(code) == 5:
+                industry_names[code] = name
+                
+    # 2. 解析 tdxhy.cfg
+    results = []
+    with open(hy_path, "r", encoding="utf-8") as f:
+        for line in f:
+            parts = line.strip().split("|")
+            if len(parts) >= 3:
+                market_id, code, hy_code = parts[0], parts[1], parts[2]
+                if len(hy_code) >= 5:
+                    hy_level2 = hy_code[:5]
+                    market = "sz" if market_id == "0" else ("sh" if market_id == "1" else "bj")
+                    name = industry_names.get(hy_level2, "其它行业")
+                    results.append({
+                        "symbol": f"{market}{code}",
+                        "industry_code": hy_level2,
+                        "industry_name": name
+                    })
+                    
+    df = pd.DataFrame(results)
+    os.makedirs(os.path.dirname(output_parquet_path), exist_ok=True)
+    df.to_parquet(output_parquet_path, index=False, compression="snappy")
+    print(f"✅ 行业映射数据同步完成! 写入 {output_parquet_path}，共 {len(df)} 条映射。")
+    return df
+
 def main():
     print("=" * 70)
     print("      通达信本地数据池极速多进程同步引擎 (Phase 2)")
@@ -139,6 +193,13 @@ def main():
         sync_all_blocks(hq_cache_dir, output_parquet_path)
     except Exception as e:
         print(f"❌ 同步板块映射失败: {e}")
+        
+    print("\n[Step 4.5] 正在同步全局行业板块分类映射关系...")
+    try:
+        output_ind_path = os.path.join(DATA_STORE_DIR, "industry_mappings.parquet")
+        sync_all_industries(TDX_DIR, output_ind_path)
+    except Exception as e:
+        print(f"❌ 同步行业映射失败: {e}")
         
     if not tasks:
         print("\n🎉 完美！所有本地数据已是最新状态，无需同步！")

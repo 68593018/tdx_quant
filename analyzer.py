@@ -27,6 +27,7 @@ except ImportError:
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_STORE_DIR = os.path.join(CURRENT_DIR, "data")
 BLOCK_MAPPINGS_PATH = os.path.join(DATA_STORE_DIR, "block_mappings.parquet")
+INDUSTRY_MAPPINGS_PATH = os.path.join(DATA_STORE_DIR, "industry_mappings.parquet")
 CONFIG_PATH = os.path.join(CURRENT_DIR, "config.json")
 STRATEGIES_PATH = os.path.join(CURRENT_DIR, "strategies.json")
 OUTPUT_MD_PATH = os.path.join(CURRENT_DIR, "market_analysis_report.md")
@@ -52,12 +53,62 @@ def execute_sql(con, sql: str):
         print(f"❌ SQL 执行失败: {e}")
         sys.exit(1)
 
+def load_tdx_dir() -> str:
+    """从 config.json 配置文件中载入通达信安装路径，规避硬编码"""
+    if os.path.exists(CONFIG_PATH):
+        try:
+            with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                config = json.load(f)
+                if "tdx_dir" in config:
+                    return config["tdx_dir"]
+        except Exception:
+            pass
+    return "/mnt/e/Tools/tdx"
+
+def load_stock_names(tdx_dir: str) -> dict:
+    """从通达信 shs.tnf 和 szs.tnf 二进制缓存中极速解析股票代码与名称的映射关系"""
+    names_map = {}
+    if not tdx_dir or not os.path.exists(tdx_dir):
+        return names_map
+        
+    hq_cache_dir = os.path.join(tdx_dir, "T0002", "hq_cache")
+    tnf_files = [
+        ("sh", os.path.join(hq_cache_dir, "shs.tnf")),
+        ("sz", os.path.join(hq_cache_dir, "szs.tnf")),
+        ("bj", os.path.join(hq_cache_dir, "bjs.tnf")),
+    ]
+    
+    for market, path in tnf_files:
+        if os.path.exists(path):
+            try:
+                with open(path, "rb") as f:
+                    data = f.read()
+                record_len = 360
+                header_len = 50
+                num_records = (len(data) - header_len) // record_len
+                for i in range(num_records):
+                    offset = header_len + i * record_len
+                    record = data[offset : offset + record_len]
+                    code = record[:6].decode("gbk", errors="ignore").split("\x00")[0].strip()
+                    name = record[31:51].decode("gbk", errors="ignore").split("\x00")[0].strip()
+                    if code and name and len(code) == 6:
+                        # 转换成大写标的前缀，例如 sh600000, sz000001
+                        symbol = f"{market}{code}"
+                        names_map[symbol] = name
+            except Exception as e:
+                print(f"⚠️ 警告: 解析 {path} 失败: {e}")
+    return names_map
+
 def main():
     t_start = time.perf_counter()
     
     print("=" * 80)
     print("      通达信本地数据池 - DuckDB 全市场温度与情绪分析引擎 (Phase 5)")
     print("=" * 80)
+
+    # 0. 载入股票名称映射字典
+    tdx_dir = load_tdx_dir()
+    names_map = load_stock_names(tdx_dir)
 
     # 1. 路径和文件校验
     if not os.path.exists(DATA_STORE_DIR):
@@ -66,6 +117,10 @@ def main():
         
     if not os.path.exists(BLOCK_MAPPINGS_PATH):
         print(f"❌ 错误: 板块映射库 {BLOCK_MAPPINGS_PATH} 不存在。请先运行 'python3 sync_market.py'。")
+        return
+
+    if not os.path.exists(INDUSTRY_MAPPINGS_PATH):
+        print(f"❌ 错误: 行业映射库 {INDUSTRY_MAPPINGS_PATH} 不存在。请先运行 'python3 sync_market.py'。")
         return
 
     # 2. 载入 SQL 模板
@@ -131,6 +186,16 @@ def main():
     df_support = execute_sql(con, sql_support)
     t_sql4_end = time.perf_counter()
 
+    # --- 模块五：行业板块资金宽度与动能轮动 ---
+    sql_ind_breadth = strategies["industry_breadth"]["query_sql"]\
+        .replace("__DATA_STORE_DIR__", DATA_STORE_DIR)\
+        .replace("__PATTERNS_STR__", patterns_str)\
+        .replace("__INDUSTRY_MAPPINGS_PATH__", INDUSTRY_MAPPINGS_PATH)
+        
+    t_sql5 = time.perf_counter()
+    df_ind_breadth = execute_sql(con, sql_ind_breadth)
+    t_sql5_end = time.perf_counter()
+
     # 4. 解析整理数据
     # 提取全局基础变量
     row_temp = df_temp.iloc[0]
@@ -152,7 +217,9 @@ def main():
     for _, r in df_streaks.iterrows():
         stk = int(r['streak'])
         sym = r['symbol'].upper()
-        streaks_list.append({"symbol": sym, "streak": stk})
+        # 从名称映射字典中读取股票名称
+        cname = names_map.get(sym.lower(), "")
+        streaks_list.append({"symbol": sym, "name": cname, "streak": stk})
         streak_counts[stk] = streak_counts.get(stk, 0) + 1
 
     # 整理涨跌分布列表
@@ -186,6 +253,19 @@ def main():
             "breakout_count": int(r['breakout_count'])
         })
 
+    # 整理行业板块宽度列表
+    ind_breadth_list = []
+    for _, r in df_ind_breadth.iterrows():
+        ind_breadth_list.append({
+            "industry_name": r['industry_name'],
+            "total_stocks": int(r['total_stocks']),
+            "above_ma20_count": int(r['above_ma20_count']),
+            "above_ma20_ratio": float(r['above_ma20_ratio']),
+            "bullish_count": int(r['bullish_count']),
+            "bullish_ratio": float(r['bullish_ratio']),
+            "breakout_count": int(r['breakout_count'])
+        })
+
     # 整理大盘支撑列表
     support_list = []
     for _, r in df_support.iterrows():
@@ -208,6 +288,7 @@ def main():
         "streak_counts": {str(k): v for k, v in sorted(streak_counts.items(), reverse=True)},
         "streaks": streaks_list,
         "breadth": breadth_list,
+        "industry_breadth": ind_breadth_list,
         "support": support_list
     }
 
@@ -215,7 +296,8 @@ def main():
     print(f"✅ 全市场宏观数据链算完毕！耗时: {t_calc - t_start:.2f} 秒")
     print(f"   ├─ 市场温度与涨跌分布 SQL 耗时: {t_sql1_end - t_sql1:.4f} 秒")
     print(f"   ├─ 高度连板梯队计算 SQL 耗时: {t_sql2_end - t_sql2:.4f} 秒")
-    print(f"   ├─ 板块资金宽度计算 SQL 耗时: {t_sql3_end - t_sql3:.4f} 秒")
+    print(f"   ├─ 概念板块资金宽度计算 SQL 耗时: {t_sql3_end - t_sql3:.4f} 秒")
+    print(f"   ├─ 行业板块资金宽度计算 SQL 耗时: {t_sql5_end - t_sql5:.4f} 秒")
     print(f"   └─ 指数支撑筹码分布 SQL 耗时: {t_sql4_end - t_sql4:.4f} 秒")
 
     # =========================================================================
@@ -239,10 +321,15 @@ def main():
         # 按板数分组打印
         groups = {}
         for s in streaks_list:
-            groups[s['streak']] = groups.get(s['streak'], []) + [s['symbol']]
+            disp = f"{s['symbol']}({s['name']})" if s['name'] else s['symbol']
+            groups[s['streak']] = groups.get(s['streak'], []) + [disp]
         for k in sorted(groups.keys(), reverse=True):
             print(f"   ⭐ 【{k} 连板】({len(groups[k])}只): {', '.join(groups[k])}")
             
+    print("-" * 80)
+    print("🚀 行业板块多头动能与资金集聚 TOP 5:")
+    for i, b in enumerate(ind_breadth_list[:5]):
+        print(f"   🔥 No.{i+1} {b['industry_name']:<12} | 均线完美多头占比: {b['bullish_ratio']:.1f}% ({b['bullish_count']}/{b['total_stocks']}只) | 今日温和突破: {b['breakout_count']}只")
     print("-" * 80)
     print("🚀 概念板块多头动能与资金集聚 TOP 5:")
     for i, b in enumerate(breadth_list[:5]):
@@ -300,7 +387,8 @@ def save_markdown_report(data):
 """
     groups = {}
     for s in data['streaks']:
-        groups[s['streak']] = groups.get(s['streak'], []) + [s['symbol']]
+        disp = f"{s['symbol']}({s['name']})" if s.get('name') else s['symbol']
+        groups[s['streak']] = groups.get(s['streak'], []) + [disp]
         
     if not groups:
         content += "| 暂无高度连板 | 0 | 市场投机情绪极弱，建议空仓避险 |\n"
@@ -311,7 +399,21 @@ def save_markdown_report(data):
     content += """
 ---
 
-## 🚀 三、 概念板块均线多头占比与资金集聚 (TOP 10)
+## 🚀 三、 行业板块均线多头占比与资金集聚 (TOP 10)
+
+我们自下而上统计行业板块内部个股的走势，**均线多头排列占比越高，说明该行业机构/主力资金介入越深，中线动能最强**：
+
+| 行业板块名称 | 总个股数 (只) | 站上20日线个股数 | 均线完美多头占比 (%) | 今日放量突破数 (只) | 战略风向指标 |
+| :--- | :---: | :---: | :---: | :---: | :--- |
+"""
+    for b in data['industry_breadth'][:10]:
+        indicator = "🔥 绝对主线" if b['bullish_ratio'] >= 40 else ("✨ 中期多头" if b['bullish_ratio'] >= 25 else "⚡ 局部活跃")
+        content += f"| **{b['industry_name']}** | {b['total_stocks']} | {b['above_ma20_count']} | **{b['bullish_ratio']:.1f}%** | {b['breakout_count']} | {indicator} |\n"
+
+    content += """
+---
+
+## 🚀 四、 概念板块均线多头占比与资金集聚 (TOP 10)
 
 我们自下而上统计板块内部个股的走势，**均线多头排列占比越高，说明该板块机构/主力建仓介入越深，中线动能最强**：
 
@@ -325,7 +427,7 @@ def save_markdown_report(data):
     content += """
 ---
 
-## 📊 四、 上证指数筹码压力位分布 (120日累积成交额)
+## 📊 五、 上证指数筹码压力位分布 (120日累积成交额)
 
 利用 120 个交易日的价格分段筹码堆积带，能够直接预警大盘在反弹和调整过程中的**中期强力支撑带**与**抛压阻力带**：
 
@@ -342,7 +444,7 @@ def save_markdown_report(data):
 ---
 > 💡 **投研建议**：
 > 1. 如果**市场中位数涨幅 < 0** 且 **涨幅分布集中在 [-3%, 0%] 甚至更低区间**，说明当下市场极度缺乏持续性，个股炸板率增高，建议严防亏钱效应。
-> 2. 观察 **概念板块 TOP 3** 的放量突破股，这是寻找次日**资金流向最热板块核心龙一/龙二个股**的最强罗盘。
+> 2. 观察 **行业板块与概念板块 TOP 3** 的放量突破股，这是寻找次日**资金流向最热板块核心龙一/龙二个股**的最强罗盘。
 """
     with open(OUTPUT_MD_PATH, "w", encoding="utf-8") as f:
         f.write(content)
@@ -623,8 +725,26 @@ def generate_html_dashboard(data):
         </div>
     </div>
 
-    <div class="grid-dashboard">
-        <!-- 板块宽度排行 -->
+    <div class="grid-dashboard" style="grid-template-columns: 1fr 1fr;">
+        <!-- 行业板块宽度排行 -->
+        <div class="card-chart">
+            <div class="chart-title">🚀 行业板块均线多头占比排行 (前十强主线)</div>
+            <table class="table-area" id="table-industries">
+                <thead>
+                    <tr>
+                        <th>行业名称</th>
+                        <th>成分股数</th>
+                        <th>中线多头排列比</th>
+                        <th>今日放量突破股</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <!-- JS 自动注入 -->
+                </tbody>
+            </table>
+        </div>
+
+        <!-- 概念板块宽度排行 -->
         <div class="card-chart">
             <div class="chart-title">🚀 概念板块均线多头占比排行 (前十强主线)</div>
             <table class="table-area" id="table-sectors">
@@ -641,7 +761,9 @@ def generate_html_dashboard(data):
                 </tbody>
             </table>
         </div>
+    </div>
 
+    <div class="grid-dashboard">
         <!-- 短线连板梯队 -->
         <div class="card-chart">
             <div class="chart-title">🪜 最新活跃游资投机连板高度梯队</div>
@@ -657,6 +779,16 @@ def generate_html_dashboard(data):
                     <!-- JS 自动注入 -->
                 </tbody>
             </table>
+        </div>
+        
+        <!-- 量化风向与投研建议 -->
+        <div class="card-chart">
+            <div class="chart-title">💡 投研建议与战术指标指南</div>
+            <div style="padding: 1rem 0; line-height: 1.8; color: var(--text-main);">
+                <p style="margin-bottom: 1rem;"><strong style="color: var(--primary);">1. 市场温度判定：</strong>当中位数涨幅为正且上涨家数显著多于下跌家数时，市场赚钱效应偏暖，适合积极介入；反之，若中位数涨幅为负且跌停个股增加，说明市场赚钱效应偏冷，宜控仓避险。</p>
+                <p style="margin-bottom: 1rem;"><strong style="color: var(--secondary);">2. 寻找绝对主线：</strong>关注完美多头占比超过 40% 的行业板块。此类板块通常有持续不断的机构或主力资金流入，是中期持股的首选方向。</p>
+                <p><strong style="color: var(--accent);">3. 狙击短线先锋：</strong>在多头占比高的概念或行业中，寻找今日放量突破 MA20 的个股。这往往是板块启动或加速时的最强信号股，结合连板梯队高度可以精准捕捉游资炒作的核心龙头。</p>
+            </div>
         </div>
     </div>
 
@@ -753,7 +885,25 @@ def generate_html_dashboard(data):
         };
         chartSupport.setOption(supportOption);
 
-        // 4. 填充概念板块多头动能表格 (Top 10)
+        // 4.1 填充行业板块多头动能表格 (Top 10)
+        const indTbody = document.querySelector("#table-industries tbody");
+        MARKET_DATA.industry_breadth.slice(0, 10).forEach(b => {
+            const tr = document.createElement("tr");
+            tr.innerHTML = `
+                <td><strong>${b.industry_name}</strong></td>
+                <td>${b.total_stocks} 只</td>
+                <td>
+                    <div class="progress-bar-bg">
+                        <div class="progress-bar-fill" style="width: ${b.bullish_ratio}%"></div>
+                    </div>
+                    <strong>${b.bullish_ratio.toFixed(1)}%</strong>
+                </td>
+                <td><span style="color: var(--primary); font-weight: bold;">${b.breakout_count} 只</span></td>
+            `;
+            indTbody.appendChild(tr);
+        });
+
+        // 4.2 填充概念板块多头动能表格 (Top 10)
         const secTbody = document.querySelector("#table-sectors tbody");
         MARKET_DATA.breadth.slice(0, 10).forEach(b => {
             const tr = document.createElement("tr");
@@ -778,7 +928,8 @@ def generate_html_dashboard(data):
         const streakGroups = {};
         MARKET_DATA.streaks.forEach(s => {
             streakGroups[s.streak] = streakGroups[s.streak] || [];
-            streakGroups[s.streak].push(s.symbol);
+            const disp = s.name ? `${s.symbol}(${s.name})` : s.symbol;
+            streakGroups[s.streak].push(disp);
         });
         
         const sortedStreaks = Object.keys(streakGroups).map(Number).sort((a,b) => b-a);
