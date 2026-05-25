@@ -72,6 +72,39 @@ def execute_single_sql(con, query_sql: str) -> str:
         print(f"❌ SQL 执行失败: {e}")
         sys.exit(1)
 
+def load_stock_names(tdx_dir: str) -> dict:
+    """从通达信 shs.tnf 和 szs.tnf 二进制缓存中极速解析股票代码与名称的映射关系"""
+    names_map = {}
+    if not tdx_dir or not os.path.exists(tdx_dir):
+        return names_map
+        
+    hq_cache_dir = os.path.join(tdx_dir, "T0002", "hq_cache")
+    tnf_files = [
+        ("sh", os.path.join(hq_cache_dir, "shs.tnf")),
+        ("sz", os.path.join(hq_cache_dir, "szs.tnf")),
+        ("bj", os.path.join(hq_cache_dir, "bjs.tnf")),
+    ]
+    
+    for market, path in tnf_files:
+        if os.path.exists(path):
+            try:
+                with open(path, "rb") as f:
+                    data = f.read()
+                record_len = 360
+                header_len = 50
+                num_records = (len(data) - header_len) // record_len
+                for i in range(num_records):
+                    offset = header_len + i * record_len
+                    record = data[offset : offset + record_len]
+                    code = record[:6].decode("gbk", errors="ignore").split("\x00")[0].strip()
+                    name = record[31:51].decode("gbk", errors="ignore").split("\x00")[0].strip()
+                    if code and name and len(code) == 6:
+                        symbol = f"{market}{code}"
+                        names_map[symbol] = name
+            except Exception as e:
+                print(f"⚠️ 警告: 解析 {path} 失败: {e}")
+    return names_map
+
 def main():
     # 1. 载入策略配置文件
     strategies = load_strategies()
@@ -112,6 +145,9 @@ def main():
                     tdx_dir = config["tdx_dir"]
         except Exception:
             pass
+            
+    # 载入股票名称映射字典
+    names_map = load_stock_names(tdx_dir)
 
     # 动态匹配现有的数据文件前缀
     prefixes = ['sh', 'sz', 'bj']
@@ -174,12 +210,13 @@ def main():
             
         # 格式化
         res_df['Symbol'] = res_df['symbol'].str.upper()
+        res_df['Name'] = res_df['symbol'].map(lambda x: names_map.get(x.lower(), ""))
         res_df['Close_Formatted'] = res_df['Close'].map(lambda x: f"{x:.2f} 元")
         res_df['Vol_Ratio_Formatted'] = res_df['Vol_Ratio'].map(lambda x: f"{x:.2f} 倍")
         res_df['Dev_MA20_Pct_Formatted'] = res_df['Dev_MA20_Pct'].map(lambda x: f"+{x:.2f}%")
         
-        show_df = res_df[['Symbol', 'Close_Formatted', 'Vol_Ratio_Formatted', 'Dev_MA20_Pct_Formatted', 'Resonance_Sectors']].head(30)
-        show_df.columns = ['Symbol', 'Close', 'Vol_Ratio', 'Dev_MA20_Pct', 'Resonance_Sectors']
+        show_df = res_df[['Symbol', 'Name', 'Close_Formatted', 'Vol_Ratio_Formatted', 'Dev_MA20_Pct_Formatted', 'Resonance_Sectors']].head(30)
+        show_df.columns = ['Symbol', 'Name', 'Close', 'Vol_Ratio', 'Dev_MA20_Pct', 'Resonance_Sectors']
         
         try:
             import pandas as pd
@@ -215,11 +252,11 @@ def main():
 ## 🏆 黄金共振突破股列表
 共筛选出 **{len(res_df)}** 只黄金个股，已按今日放量倍数降序排列：
 
-| 序号 | 股票代码 | 最新收盘价 | 今日放量倍数 | MA20 偏离度 | 触发共振爆发板块（突破只数/板块总股数占比） |
-| :---: | :---: | :---: | :---: | :---: | :--- |
+| 序号 | 股票代码 | 股票名称 | 最新收盘价 | 今日放量倍数 | MA20 偏离度 | 触发共振爆发板块（突破只数/板块总股数占比） |
+| :---: | :---: | :---: | :---: | :---: | :---: | :--- |
 """
             for idx, row in res_df.iterrows():
-                md_content += f"| {idx+1} | `{row['Symbol']}` | {row['Close_Formatted']} | {row['Vol_Ratio_Formatted']} | {row['Dev_MA20_Pct_Formatted']} | {row['Resonance_Sectors']} |\n"
+                md_content += f"| {idx+1} | `{row['Symbol']}` | {row['Name']} | {row['Close_Formatted']} | {row['Vol_Ratio_Formatted']} | {row['Dev_MA20_Pct_Formatted']} | {row['Resonance_Sectors']} |\n"
                 
             md_content += """
 ---
@@ -293,6 +330,7 @@ def main():
         # 格式化
         import pandas as pd
         res_df['Symbol'] = res_df['symbol'].str.upper()
+        res_df['Name'] = res_df['symbol'].map(lambda x: names_map.get(x.lower(), ""))
         res_df['Close_Formatted'] = res_df['Close'].map(lambda x: f"{x:.2f} 元")
         res_df['Vol_Ratio_Formatted'] = res_df['Vol_Ratio'].map(lambda x: f"{x:.2f} 倍")
         res_df['Dev_MA20_Pct_Formatted'] = res_df['Dev_MA20_Pct'].map(lambda x: f"+{x:.2f}%")
@@ -309,8 +347,8 @@ def main():
             
         res_df['Merged_Sectors'] = res_df.apply(merge_sectors, axis=1)
         
-        show_df = res_df[['Symbol', 'Close_Formatted', 'Vol_Ratio_Formatted', 'Dev_MA20_Pct_Formatted', 'Merged_Sectors']].head(30)
-        show_df.columns = ['Symbol', 'Close', 'Vol_Ratio', 'Dev_MA20_Pct', 'Resonance_Sectors']
+        show_df = res_df[['Symbol', 'Name', 'Close_Formatted', 'Vol_Ratio_Formatted', 'Dev_MA20_Pct_Formatted', 'Merged_Sectors']].head(30)
+        show_df.columns = ['Symbol', 'Name', 'Close', 'Vol_Ratio', 'Dev_MA20_Pct', 'Resonance_Sectors']
         
         pd.set_option('display.width', 1000)
         pd.set_option('display.max_colwidth', 50)
@@ -338,11 +376,11 @@ def main():
 ## 🏆 黄金多重共振交集股列表
 本列表中的个股**必须同时百分之百满足以上所有选股策略**，代表了市场中最强悍的量化共鸣点：
 
-| 序号 | 股票代码 | 最新收盘价 | 今日放量倍数 | MA20 偏离度 | 综合触发共振板块（突破只数/占比） |
-| :---: | :---: | :---: | :---: | :---: | :--- |
+| 序号 | 股票代码 | 股票名称 | 最新收盘价 | 今日放量倍数 | MA20 偏离度 | 综合触发共振板块（突破只数/占比） |
+| :---: | :---: | :---: | :---: | :---: | :---: | :--- |
 """
             for idx, row in res_df.iterrows():
-                md_content += f"| {idx+1} | `{row['Symbol']}` | {row['Close_Formatted']} | {row['Vol_Ratio_Formatted']} | {row['Dev_MA20_Pct_Formatted']} | {row['Merged_Sectors']} |\n"
+                md_content += f"| {idx+1} | `{row['Symbol']}` | {row['Name']} | {row['Close_Formatted']} | {row['Vol_Ratio_Formatted']} | {row['Dev_MA20_Pct_Formatted']} | {row['Merged_Sectors']} |\n"
                 
             md_content += """
 ---
