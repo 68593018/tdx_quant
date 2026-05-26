@@ -60,9 +60,20 @@ HTML_TEMPLATE_PATH = os.path.join(CURRENT_DIR, "market_dashboard.html")
 # 缓存大势计算结果
 _MARKET_CACHE = {
     "data": None,
-    "timestamp": 0.0
+    "signature": None
 }
-CACHE_EXPIRE_SECONDS = 15.0  # 15秒缓存机制
+
+def get_data_signature() -> float:
+    """获取数据池文件的最新修改时间特征签名，用于智能缓存校验"""
+    try:
+        if not os.path.exists(DATA_STORE_DIR):
+            return 0.0
+        files = [os.path.join(DATA_STORE_DIR, f) for f in os.listdir(DATA_STORE_DIR) if f.endswith('.parquet')]
+        if not files:
+            return 0.0
+        return max(os.path.getmtime(f) for f in files)
+    except Exception:
+        return 0.0
 
 # 异步数据同步全局状态
 sync_task_status = {
@@ -353,10 +364,10 @@ def add_new_strategy(req: AddStrategyRequest):
 @app.get("/api/market/data", summary="极速多线程计算并获取全市场情绪与大盘雷达 JSON 数据")
 def get_market_data():
     global _MARKET_CACHE
-    now = time.time()
     
-    # 命中缓存
-    if _MARKET_CACHE["data"] is not None and (now - _MARKET_CACHE["timestamp"]) < CACHE_EXPIRE_SECONDS:
+    # 智能数据指纹指征，当 underlying 数据没有发生更新时，直接秒级返回缓存数据
+    current_sig = get_data_signature()
+    if _MARKET_CACHE["data"] is not None and _MARKET_CACHE["signature"] == current_sig:
         return _MARKET_CACHE["data"]
 
     t_start = time.perf_counter()
@@ -526,7 +537,7 @@ def get_market_data():
 
     # 写入缓存
     _MARKET_CACHE["data"] = full_data
-    _MARKET_CACHE["timestamp"] = now
+    _MARKET_CACHE["signature"] = current_sig
     
     return full_data
 
