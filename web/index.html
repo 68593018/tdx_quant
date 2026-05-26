@@ -226,10 +226,38 @@
                 </div>
             </div>
 
-            <!-- ======================= 🚀 TAB 2: 多因子选股 ======================= -->
             <div v-show="activeTab === 'screener'" class="grid grid-cols-1 lg:grid-cols-4 gap-8">
                 <!-- 左边策略栏 -->
                 <div class="glass-card rounded-2xl p-6 lg:col-span-1 space-y-6">
+                    <!-- 标的类别筛选 -->
+                    <div class="space-y-3">
+                        <div class="text-sm font-semibold border-b border-white/5 pb-3 flex items-center gap-2">
+                            <span>🎯</span> 选股标的范围
+                        </div>
+                        <div class="grid grid-cols-2 gap-2 bg-cyber-card/30 p-3 rounded-xl border border-cyber-border/40">
+                            <label class="flex items-center gap-2 text-xs text-cyber-textMuted hover:text-white cursor-pointer select-none">
+                                <input type="checkbox" value="stock" v-model="screenerCategories" class="w-3.5 h-3.5 rounded text-cyber-primary focus:ring-0 cursor-pointer">
+                                股票 (A股)
+                            </label>
+                            <label class="flex items-center gap-2 text-xs text-cyber-textMuted hover:text-white cursor-pointer select-none">
+                                <input type="checkbox" value="index" v-model="screenerCategories" class="w-3.5 h-3.5 rounded text-cyber-primary focus:ring-0 cursor-pointer">
+                                指数
+                            </label>
+                            <label class="flex items-center gap-2 text-xs text-cyber-textMuted hover:text-white cursor-pointer select-none">
+                                <input type="checkbox" value="sector" v-model="screenerCategories" class="w-3.5 h-3.5 rounded text-cyber-primary focus:ring-0 cursor-pointer">
+                                板块
+                            </label>
+                            <label class="flex items-center gap-2 text-xs text-cyber-textMuted hover:text-white cursor-pointer select-none">
+                                <input type="checkbox" value="fund" v-model="screenerCategories" class="w-3.5 h-3.5 rounded text-cyber-primary focus:ring-0 cursor-pointer">
+                                基金
+                            </label>
+                            <label class="flex items-center gap-2 text-xs text-cyber-textMuted hover:text-white cursor-pointer select-none col-span-2 mt-1">
+                                <input type="checkbox" value="bond" v-model="screenerCategories" class="w-3.5 h-3.5 rounded text-cyber-primary focus:ring-0 cursor-pointer">
+                                债券 (可转债等)
+                            </label>
+                        </div>
+                    </div>
+
                     <div class="text-sm font-semibold border-b border-white/5 pb-3 flex items-center justify-between">
                         <span class="flex items-center gap-2"><span>📂</span> 策略库目录</span>
                         <span class="text-[10px] bg-cyber-primary/10 border border-cyber-primary/20 text-cyber-primary px-2 py-0.5 rounded font-mono">{{ strategies.length }}</span>
@@ -613,6 +641,7 @@
                 const selectedStrategy = ref(null);
                 const selectedStrategySql = ref("");
                 const screenerKeys = ref([]);
+                const screenerCategories = ref(["stock"]);
                 const screenerLoading = ref(false);
                 const screenerResult = ref({});
 
@@ -894,7 +923,10 @@
                         const res = await fetch("/api/screener/run", {
                             method: "POST",
                             headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({ strategies: screenerKeys.value })
+                            body: JSON.stringify({ 
+                                strategies: screenerKeys.value, 
+                                categories: screenerCategories.value 
+                            })
                         });
                         screenerResult.value = await res.json();
                     } catch (e) {
@@ -1004,6 +1036,7 @@
                     selectedStrategy,
                     selectedStrategySql,
                     screenerKeys,
+                    screenerCategories,
                     screenerLoading,
                     screenerResult,
                     saveStrategy,

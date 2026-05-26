@@ -274,9 +274,34 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+def generate_category_filter(categories: list[str]) -> str:
+    """根据标的分类生成 DuckDB filename 模糊匹配 SQL 子句"""
+    if not categories:
+        return "(filename LIKE '%sh60%' OR filename LIKE '%sh68%' OR filename LIKE '%sz00%' OR filename LIKE '%sz30%' OR filename LIKE '%/bj%')"
+        
+    mapping = {
+        "stock": "(filename LIKE '%sh60%' OR filename LIKE '%sh68%' OR filename LIKE '%sz00%' OR filename LIKE '%sz30%' OR filename LIKE '%/bj%')",
+        "index": "(filename LIKE '%sh000%' OR filename LIKE '%sz399%')",
+        "sector": "(filename LIKE '%sh88%' OR filename LIKE '%sz88%')",
+        "fund": "(filename LIKE '%sh50%' OR filename LIKE '%sh51%' OR filename LIKE '%sh52%' OR filename LIKE '%sh58%' OR filename LIKE '%sz15%' OR filename LIKE '%sz16%' OR filename LIKE '%sz18%')",
+        "bond": "(filename LIKE '%sh11%' OR filename LIKE '%sh13%' OR filename LIKE '%sz12%')"
+    }
+    
+    clauses = []
+    for cat in categories:
+        cat_lower = cat.lower()
+        if cat_lower in mapping:
+            clauses.append(mapping[cat_lower])
+            
+    if not clauses:
+        return mapping["stock"]
+        
+    return f"({' OR '.join(clauses)})"
+
 # Pydantic 策略参数模型
 class ScreenerRequest(BaseModel):
     strategies: list[str]
+    categories: list[str] = ["stock"]
 
 class AddStrategyRequest(BaseModel):
     key: str
@@ -348,24 +373,29 @@ def get_market_data():
     con = duckdb.connect()
     con.execute(f"SET threads = {os.cpu_count()}")
 
+    default_stock_filter = "(filename LIKE '%sh60%' OR filename LIKE '%sh68%' OR filename LIKE '%sz00%' OR filename LIKE '%sz30%' OR filename LIKE '%/bj%')"
+
     try:
         # 1. 市场温度与涨跌区间
         sql_temp = strategies["market_temperature"]["query_sql"]\
             .replace("__DATA_STORE_DIR__", DATA_STORE_DIR)\
-            .replace("__PATTERNS_STR__", patterns_str)
+            .replace("__PATTERNS_STR__", patterns_str)\
+            .replace("__CATEGORY_FILTER__", default_stock_filter)
         df_temp = con.execute(sql_temp).fetchdf()
 
         # 2. 连板高度梯队
         sql_streaks = strategies["limit_up_streaks"]["query_sql"]\
             .replace("__DATA_STORE_DIR__", DATA_STORE_DIR)\
-            .replace("__PATTERNS_STR__", patterns_str)
+            .replace("__PATTERNS_STR__", patterns_str)\
+            .replace("__CATEGORY_FILTER__", default_stock_filter)
         df_streaks = con.execute(sql_streaks).fetchdf()
 
         # 3. 概念板块宽度
         sql_breadth = strategies["sector_breadth"]["query_sql"]\
             .replace("__DATA_STORE_DIR__", DATA_STORE_DIR)\
             .replace("__PATTERNS_STR__", patterns_str)\
-            .replace("__BLOCK_MAPPINGS_PATH__", BLOCK_MAPPINGS_PATH)
+            .replace("__BLOCK_MAPPINGS_PATH__", BLOCK_MAPPINGS_PATH)\
+            .replace("__CATEGORY_FILTER__", default_stock_filter)
         df_breadth = con.execute(sql_breadth).fetchdf()
 
         # 4. 指数支撑压力
@@ -377,21 +407,24 @@ def get_market_data():
         sql_ind_breadth = strategies["industry_breadth"]["query_sql"]\
             .replace("__DATA_STORE_DIR__", DATA_STORE_DIR)\
             .replace("__PATTERNS_STR__", patterns_str)\
-            .replace("__INDUSTRY_MAPPINGS_PATH__", INDUSTRY_MAPPINGS_PATH)
+            .replace("__INDUSTRY_MAPPINGS_PATH__", INDUSTRY_MAPPINGS_PATH)\
+            .replace("__CATEGORY_FILTER__", default_stock_filter)
         df_ind_breadth = con.execute(sql_ind_breadth).fetchdf()
 
         # 6. 行业30日资金流向
         sql_ind_flow = strategies["industry_flow_30d"]["query_sql"]\
             .replace("__DATA_STORE_DIR__", DATA_STORE_DIR)\
             .replace("__PATTERNS_STR__", patterns_str)\
-            .replace("__INDUSTRY_MAPPINGS_PATH__", INDUSTRY_MAPPINGS_PATH)
+            .replace("__INDUSTRY_MAPPINGS_PATH__", INDUSTRY_MAPPINGS_PATH)\
+            .replace("__CATEGORY_FILTER__", default_stock_filter)
         df_ind_flow = con.execute(sql_ind_flow).fetchdf()
 
         # 7. 概念30日资金流向
         sql_concept_flow = strategies["concept_flow_30d"]["query_sql"]\
             .replace("__DATA_STORE_DIR__", DATA_STORE_DIR)\
             .replace("__PATTERNS_STR__", patterns_str)\
-            .replace("__BLOCK_MAPPINGS_PATH__", BLOCK_MAPPINGS_PATH)
+            .replace("__BLOCK_MAPPINGS_PATH__", BLOCK_MAPPINGS_PATH)\
+            .replace("__CATEGORY_FILTER__", default_stock_filter)
         df_concept_flow = con.execute(sql_concept_flow).fetchdf()
         
     except Exception as e:
@@ -525,12 +558,16 @@ def run_screener(req: ScreenerRequest):
     dfs = []
     
     try:
+        categories = req.categories if req.categories is not None else ["stock"]
+        category_filter = generate_category_filter(categories)
+        
         for key in req.strategies:
             sql = strategies[key]["query_sql"]\
                 .replace("__DATA_STORE_DIR__", DATA_STORE_DIR)\
                 .replace("__PATTERNS_STR__", patterns_str)\
                 .replace("__BLOCK_MAPPINGS_PATH__", BLOCK_MAPPINGS_PATH)\
-                .replace("__INDUSTRY_MAPPINGS_PATH__", INDUSTRY_MAPPINGS_PATH)
+                .replace("__INDUSTRY_MAPPINGS_PATH__", INDUSTRY_MAPPINGS_PATH)\
+                .replace("__CATEGORY_FILTER__", category_filter)
             
             df = con.execute(sql).fetchdf()
             dfs.append(df)

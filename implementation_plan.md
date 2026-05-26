@@ -1,73 +1,91 @@
-# 🚀 最近30个交易日板块资金流向时序与领涨领跌分析开发计划
+# 🚀 多因子选股标的范围动态分类筛选设计方案
 
-为了帮助投资者深刻研判中期资金在不同行业与概念板块之间的流动趋势，本阶段计划在现有“全市场情绪温度引擎”中新增 **最近30个交易日板块资金流向时序图与领涨领跌曲线** 功能。该功能将无缝整合至终端控制台、Markdown 报告以及 `market_dashboard.html` 赛博大屏看板中。
+当前量化分析系统的数据池中混合了**股票、指数、板块、基金、债券**等多种类型的 Parquet 日K线数据。由于此前所有的选股策略均未对标的类别进行区分，导致在执行多因子选股时，结果中会混杂大盘指数、板块指数、公募基金或可转债，无法满足用户针对特定标的范围进行精确选股的需求。
 
----
-
-## 💎 核心功能设计 (Core Features)
-
-1. **📊 30个交易日资金时序统计**：
-   - 动态获取最新 30 个交易日（通过 `sh600000` 或其他标的对齐交易日历，规避节假日非交易时间）。
-   - 分别提取全市场 5,000+ A股在 30 个交易日内每日的 `amount`（成交额，单位：元）。
-   - 汇总每日全市场总成交额作为相对基准。
-
-2. **🏷️ 区分行业板块与概念板块**：
-   - **行业板块**：关联 `data/industry_mappings.parquet` 中的 56 个二级行业。
-   - **概念板块**：关联 `data/block_mappings.parquet` 中的概念分类（`block_category = 'concept'`）。
-   - 分别按日累加行业板块和概念板块名下所有成分股的日成交额。
-
-3. **📈 双维度曲线图呈现**：
-   - **绝对资金量变化**：展示板块日成交额（单位：亿元）。
-   - **相对资金量变化**：计算 `板块日成交额 / 当日全市场总成交额 * 100`（百分比形式），体现板块对全市场资金的吸纳力和强弱相对度。
-
-4. **⚡ TOP 10 与 BOTTOM 10 板块过滤**：
-   - 以**最新交易日**的资金吸纳量（绝对额或相对比例）进行全局排序。
-   - 分别筛选出资金流入最深的前 10 名（**领涨主线/多头抱团**）和排名最后 10 名（**失血方向/空头冷门**）的板块名称。
-   - 在 ECharts 曲线中渲染这 20 个板块的 30 日时序曲线。为了避免图表过于拥挤，默认开启 TOP 10 曲线，BOTTOM 10 曲线默认置灰（用户可点击图例一键开启）。
-
-5. **📺 赛博大屏看板交互式升级**：
-   - 在仪表盘大屏中新增一整行宽幅区域，部署 **“最近30日板块资金流向时序看板”**。
-   - 提供极美 tab 切换（“行业板块资金流向” / “概念板块资金流向”）。
-   - 内部包含左右分栏或选项切换展示绝对资金（亿元）和相对资金比例（%）的 ECharts 时序折线图。
-   - 维持高档的 Cyber-Neon 黑暗美学风格与高斯模糊拉伸背景。
+本方案旨在：
+1. 在 **FastAPI 后端 (`server.py`)** 引入动态标的分选过滤逻辑，利用 Parquet 日K线文件名前缀特征，支持用户自选的类别范围拼接 SQL 过滤表达式，并替换策略 SQL 中的 `__CATEGORY_FILTER__` 占位符。
+2. 在 **Vue 交互前端 (`web/index.html`)** 的策略选股面板中，新增一个高颜值的玻璃态“🎯 选股标的范围”复选框组件，允许用户勾选一个或多个类别（股票、指数、板块、基金、债券），并在运行选股时将其提交至后端。
+3. 确保宏观分析接口（如大势温度、涨跌分布等）在后端调用 SQL 时默认替换为标准 A 股过滤，以保持大盘情绪分析的纯净度和一致性。
 
 ---
 
-## 🛠️ Proposed Changes
+## User Review Required
 
-我们将通过以下具体的代码改动，实现功能的完美落地：
-
-### 1. [MODIFY] [strategies.json](file:///home/liliiflora/work/wsl-agy-projects/tdx_quant/strategies.json)
-* 追加两个高性能时序查询 SQL，用以在 2 秒内算出板块 30 日的绝对与相对交易额：
-  - `"industry_flow_30d"`：行业板块 30 日日历及资金比率 SQL。
-  - `"concept_flow_30d"`：概念板块 30 日日历及资金比率 SQL。
-* 利用 `latest_dates` CTE 限制 30 天区间，保证 DuckDB 在超大并发下仍能在 2 秒内输出完毕。
-
-### 2. [MODIFY] [analyzer.py](file:///home/liliiflora/work/wsl-agy-projects/tdx_quant/analyzer.py)
-* **执行器升级**：
-  - 读取并绑定 `"industry_flow_30d"` 和 `"concept_flow_30d"`。
-  - 在 `main()` 中并行计算，并将输出的 DataFrame 进行时序对齐处理。
-  - 编写排序算法自动选定最新交易日的 TOP 10 和 BOTTOM 10 板块，将数据打包至 `full_data` 中的 `"industry_flow"` 和 `"concept_flow"` 键下。
-* **Markdown 报告模板升级**：
-  - 在报告中新增 `六、最近30交易日板块资金流向风向标` 章节。
-  - 打印出最新交易日最吸金和失血最严重的 TOP 10/BOTTOM 10 列表与 30 日趋势简述。
-* **HTML 大势看板升级**：
-  - 升级 `html_template`。在 `table-streaks` 下方新增一个满宽的 `card-chart` 容器。
-  - 增加概念/行业 tab 按钮以及绝对/相对曲线容器，用 ECharts 动态折线图展示 TOP 10/BOTTOM 10 板块的 30 日走势，辅以平滑曲线（`smooth: true`）与渐变面积填充。
-
----
-
-## 🔁 Verification Plan
-
-### 自动化验证与结果展示
-1. 在 WSL 终端运行分析器：
-   ```bash
-   python3 analyzer.py
-   ```
-2. 确认控制台执行耗时统计中，包含 30 日资金流向计算的时间，且总耗时仍保持在 15 秒左右。
-3. 检查生成的 `market_analysis_report.md`，确认新增的 `六、最近30交易日板块资金流向风向标` 部分数据真实无误。
-4. 在浏览器中打开 `market_dashboard.html`，确认 ECharts 曲线渲染顺滑，颜色与暗色背景完美契合，且图例支持点击切换。
-
----
 > [!IMPORTANT]
-> 我们当前处于**“计划评审阶段”**。本设计将以极佳 of 图表交互与极速 of 查询性能（利用 DuckDB 的内存级并行能力）交付您的核心需求。如果您对本方案的布局或展示策略有任何修改意见，请随时反馈！一旦您批准本计划，我们将立即转入开发执行阶段！
+> - **默认值设定**：默认进入页面时只勾选“股票（A股）”类别，以保证绝大多数用户的常规选股体验，避免因为全选导致非股票标的混入。
+> - **空勾选容错**：如果用户取消勾选了所有标的类别，系统将自动回退并默认以“股票”为范围进行计算，避免由于过滤条件为空导致 SQL 语法错误或返回空结果。
+
+---
+
+## Open Questions
+
+> [!NOTE]
+> - **关于北京证券交易所 (BJ) 股票的匹配**：在数据同步模块中，北交所股票保存为 `bjXXXXXX.parquet`（如 `bj830000.parquet`），在 DuckDB 中其路径匹配表达式为 `filename LIKE '%bj%'`。我们将沿用此映射规则，确保北证 A 股选股不遗漏。
+
+---
+
+## Proposed Changes
+
+### 1. 后端服务逻辑 (Backend Service)
+
+#### [MODIFY] [server.py](file:///home/liliiflora/work/wsl-agy-projects/tdx_quant/server.py)
+* **Pydantic 模型更新**：
+  在 `ScreenerRequest` 中新增 `categories` 列表参数：
+  ```python
+  class ScreenerRequest(BaseModel):
+      strategies: list[str]
+      categories: list[str] = ["stock"]
+  ```
+* **标的分类过滤辅助函数**：
+  新增 `generate_category_filter(categories: list[str]) -> str`，根据传入的类别标识符（`stock`, `index`, `sector`, `fund`, `bond`）映射为对应的 `filename LIKE` 过滤 SQL 子句：
+  - `stock`: `(filename LIKE '%sh60%' OR filename LIKE '%sh68%' OR filename LIKE '%sz00%' OR filename LIKE '%sz30%' OR filename LIKE '%/bj%')`
+  - `index`: `(filename LIKE '%sh000%' OR filename LIKE '%sz399%')`
+  - `sector`: `(filename LIKE '%sh88%' OR filename LIKE '%sz88%')`
+  - `fund`: `(filename LIKE '%sh50%' OR filename LIKE '%sh51%' OR filename LIKE '%sh52%' OR filename LIKE '%sh58%' OR filename LIKE '%sz15%' OR filename LIKE '%sz16%' OR filename LIKE '%sz18%')`
+  - `bond`: `(filename LIKE '%sh11%' OR filename LIKE '%sh13%' OR filename LIKE '%sz12%')`
+* **`run_screener` 接口逻辑注入**：
+  在 `run_screener` 中提取 `req.categories`，生成对应的 `category_filter`。在执行各策略 SQL 前，执行 `.replace("__CATEGORY_FILTER__", category_filter)`。
+* **`get_market_data` 接口逻辑注入**：
+  在 7 大分析策略（如大势温度、涨跌分布、连板高度等）的 SQL 计算前，统一将 `__CATEGORY_FILTER__` 替换为默认的 `stock` 过滤子句。这样即使这些分析策略的 SQL 中带有占位符，也能稳定执行且不含非股票数据。
+
+---
+
+### 2. 前端交互界面 (Frontend Interface)
+
+#### [MODIFY] [index.html](file:///home/liliiflora/work/wsl-agy-projects/tdx_quant/web/index.html)
+* **新增 UI 标的筛选组件**：
+  在 Tab 2 左侧的策略目录上方，插入一个玻璃态的 “🎯 选股标的范围” 复选面板。外观采用赛博朋克深色调与霓虹青色勾选框风格，包含 5 大类别复选按钮：
+  - [x] 股票 (A股)
+  - [ ] 指数
+  - [ ] 板块
+  - [ ] 基金
+  - [ ] 债券 (可转债等)
+* **Vue 状态与逻辑集成**：
+  - 在 `setup()` 中声明 `screenerCategories = ref(["stock"])` 响应式数据。
+  - 在 `runScreener()` 方法中，将 `categories: screenerCategories.value` 作为参数通过 POST 请求体发送至 `/api/screener/run`
+  - 在 `setup()` 的 return 对象中暴露 `screenerCategories`。
+
+---
+
+### 3. 数据编译与分析引擎 (Quant Dashboard Compiler)
+
+#### [MODIFY] [analyzer.py](file:///home/liliiflora/work/wsl-agy-projects/tdx_quant/analyzer.py)
+* 在主程序执行结束后运行 `generate_html_dashboard` 时，它会读取修改后的 `web/index.html`，这会确保静态编译的本地大屏文件 `market_dashboard.html` 保持最新的页面结构与前台离线展示数据。
+
+---
+
+## Verification Plan
+
+### 自动化验证与功能联调
+1. **测试后端启动与重载**：
+   确认 `server.py` 监听 `http://localhost:8000` 并通过 Uvicorn 自动重载生效。
+2. **股票/指数/板块多选隔离测试**：
+   - 打开浏览器，进入 **“策略选股”** 面板。
+   - **测试1：单选股票**。勾选任一策略（如“共振突破选股”），标的范围仅保留“股票”，执行选股。确认计算速度飞快，且结果中全部为 A 股个股（如 `SH60...` / `SZ00...` 等），不掺杂任何板块指数或转债。
+   - **测试2：多选基金与债券**。取消勾选股票，勾选“基金”和“债券”，执行选股。验证计算结果是否均属于公募基金和转债范围，无任何股票或指数混入。
+   - **测试3：全类别多选求合力**。全选 5 个标的范围，验证 DuckDB 是否能正确执行并完美返回全种类标的的多因子混合排名。
+3. **大盘分析接口安全验证**：
+   - 切换到 **“市场总览”** 或 **“大势分析”** 面板。
+   - 验证市场温度折线图、行业占比图以及大势雷达图是否正常加载、完全无后端报错。这说明 `get_market_data` 完美兼顾并替换了分析 SQL 中的占位符。
+4. **编译同步更新**：
+   - 运行终端命令 `python3 analyzer.py`，确认无任何 Python 编译报错，且本地 `market_dashboard.html` 生成成功。

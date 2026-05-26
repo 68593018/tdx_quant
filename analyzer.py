@@ -212,6 +212,7 @@ def main():
 
     print("⚡ 正在执行全量多线程窗口分析计算...")
     
+    default_stock_filter = "(filename LIKE '%sh60%' OR filename LIKE '%sh68%' OR filename LIKE '%sz00%' OR filename LIKE '%sz30%' OR filename LIKE '%/bj%')"
     # =========================================================================
     # 执行 4 大核心 SQL 进行全方位聚合分析
     # =========================================================================
@@ -219,7 +220,8 @@ def main():
     # --- 模块一：市场温度与涨跌分布 ---
     sql_temp = strategies["market_temperature"]["query_sql"]\
         .replace("__DATA_STORE_DIR__", DATA_STORE_DIR)\
-        .replace("__PATTERNS_STR__", patterns_str)
+        .replace("__PATTERNS_STR__", patterns_str)\
+        .replace("__CATEGORY_FILTER__", default_stock_filter)
     
     t_sql1 = time.perf_counter()
     df_temp = execute_sql(con, sql_temp)
@@ -228,7 +230,8 @@ def main():
     # --- 模块二：高度板与短线投机梯队 ---
     sql_streaks = strategies["limit_up_streaks"]["query_sql"]\
         .replace("__DATA_STORE_DIR__", DATA_STORE_DIR)\
-        .replace("__PATTERNS_STR__", patterns_str)
+        .replace("__PATTERNS_STR__", patterns_str)\
+        .replace("__CATEGORY_FILTER__", default_stock_filter)
         
     t_sql2 = time.perf_counter()
     df_streaks = execute_sql(con, sql_streaks)
@@ -238,7 +241,8 @@ def main():
     sql_breadth = strategies["sector_breadth"]["query_sql"]\
         .replace("__DATA_STORE_DIR__", DATA_STORE_DIR)\
         .replace("__PATTERNS_STR__", patterns_str)\
-        .replace("__BLOCK_MAPPINGS_PATH__", BLOCK_MAPPINGS_PATH)
+        .replace("__BLOCK_MAPPINGS_PATH__", BLOCK_MAPPINGS_PATH)\
+        .replace("__CATEGORY_FILTER__", default_stock_filter)
         
     t_sql3 = time.perf_counter()
     df_breadth = execute_sql(con, sql_breadth)
@@ -256,7 +260,8 @@ def main():
     sql_ind_breadth = strategies["industry_breadth"]["query_sql"]\
         .replace("__DATA_STORE_DIR__", DATA_STORE_DIR)\
         .replace("__PATTERNS_STR__", patterns_str)\
-        .replace("__INDUSTRY_MAPPINGS_PATH__", INDUSTRY_MAPPINGS_PATH)
+        .replace("__INDUSTRY_MAPPINGS_PATH__", INDUSTRY_MAPPINGS_PATH)\
+        .replace("__CATEGORY_FILTER__", default_stock_filter)
         
     t_sql5 = time.perf_counter()
     df_ind_breadth = execute_sql(con, sql_ind_breadth)
@@ -266,7 +271,8 @@ def main():
     sql_ind_flow = strategies["industry_flow_30d"]["query_sql"]\
         .replace("__DATA_STORE_DIR__", DATA_STORE_DIR)\
         .replace("__PATTERNS_STR__", patterns_str)\
-        .replace("__INDUSTRY_MAPPINGS_PATH__", INDUSTRY_MAPPINGS_PATH)
+        .replace("__INDUSTRY_MAPPINGS_PATH__", INDUSTRY_MAPPINGS_PATH)\
+        .replace("__CATEGORY_FILTER__", default_stock_filter)
         
     t_sql6 = time.perf_counter()
     df_ind_flow = execute_sql(con, sql_ind_flow)
@@ -276,7 +282,8 @@ def main():
     sql_concept_flow = strategies["concept_flow_30d"]["query_sql"]\
         .replace("__DATA_STORE_DIR__", DATA_STORE_DIR)\
         .replace("__PATTERNS_STR__", patterns_str)\
-        .replace("__BLOCK_MAPPINGS_PATH__", BLOCK_MAPPINGS_PATH)
+        .replace("__BLOCK_MAPPINGS_PATH__", BLOCK_MAPPINGS_PATH)\
+        .replace("__CATEGORY_FILTER__", default_stock_filter)
         
     t_sql7 = time.perf_counter()
     df_concept_flow = execute_sql(con, sql_concept_flow)
