@@ -2,6 +2,8 @@ import os
 import sys
 import json
 import time
+import re
+import threading
 from datetime import datetime
 import subprocess
 
@@ -13,6 +15,7 @@ try:
     import uvicorn
     from fastapi.middleware.cors import CORSMiddleware
     from fastapi.responses import HTMLResponse, JSONResponse
+    from fastapi.staticfiles import StaticFiles
     from pydantic import BaseModel
 except ImportError:
     print("⏳ 检测到当前环境未安装 FastAPI 或 Uvicorn 依赖，正在为您自动静默安装...")
@@ -23,6 +26,7 @@ except ImportError:
         import uvicorn
         from fastapi.middleware.cors import CORSMiddleware
         from fastapi.responses import HTMLResponse, JSONResponse
+        from fastapi.staticfiles import StaticFiles
         from pydantic import BaseModel
         print("✅ FastAPI, Uvicorn & Pydantic 依赖自动安装成功！立即启动 Web 量化服务...\n")
     except Exception as e:
@@ -58,7 +62,15 @@ _MARKET_CACHE = {
     "data": None,
     "timestamp": 0.0
 }
-CACHE_EXPIRE_SECONDS = 15.0  # 15秒内重复请求直接走缓存，避免频繁穿透 DuckDB
+CACHE_EXPIRE_SECONDS = 15.0  # 15秒缓存机制
+
+# 异步数据同步全局状态
+sync_task_status = {
+    "active": False,
+    "progress": 0,
+    "logs": []
+}
+sync_lock = threading.Lock()
 
 # -------------------------------------------------------------
 # 3. 核心工具与数据解析函数
@@ -196,7 +208,56 @@ def get_parquet_patterns() -> str:
     return ", ".join(f"'{p}'" for p in patterns)
 
 # -------------------------------------------------------------
-# 4. FastAPI 服务实例初始化
+# 4. 异步数据同步子进程引擎
+# -------------------------------------------------------------
+def async_sync_worker():
+    global sync_task_status
+    with sync_lock:
+        if sync_task_status["active"]:
+            return
+        sync_task_status["active"] = True
+        sync_task_status["progress"] = 0
+        sync_task_status["logs"] = ["🚀 开始启动全市场多进程增量数据同步... (Phase 2 & 3)\n"]
+
+    try:
+        process = subprocess.Popen(
+            [sys.executable, "sync_market.py"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1
+        )
+        
+        progress_pattern = re.compile(r'进度:\s*\[(\d+)/(\d+)\]')
+        
+        for line in process.stdout:
+            sync_task_status["logs"].append(line)
+            if len(sync_task_status["logs"]) > 500:
+                sync_task_status["logs"].pop(0)
+                
+            # 解析进度
+            if "所有本地数据已是最新状态" in line:
+                sync_task_status["progress"] = 100
+            else:
+                match = progress_pattern.search(line)
+                if match:
+                    completed, total = int(match.group(1)), int(match.group(2))
+                    if total > 0:
+                        sync_task_status["progress"] = int(completed * 100.0 / total)
+                        
+        process.wait()
+        sync_task_status["progress"] = 100
+        if process.returncode == 0:
+            sync_task_status["logs"].append("\n✅ 数据同步圆满成功！数据池已对齐至最新状态。\n")
+        else:
+            sync_task_status["logs"].append(f"\n❌ 数据同步异常退出，退出码: {process.returncode}\n")
+    except Exception as e:
+        sync_task_status["logs"].append(f"\n❌ 启动同步子进程失败: {e}\n")
+    finally:
+        sync_task_status["active"] = False
+
+# -------------------------------------------------------------
+# 5. FastAPI 服务实例初始化
 # -------------------------------------------------------------
 app = fastapi.FastAPI(
     title="通达信极速多因子量化选股系统 - Web API 服务平台",
@@ -224,22 +285,29 @@ class AddStrategyRequest(BaseModel):
     query_sql: str
 
 # -------------------------------------------------------------
-# 5. RESTful APIs 接口路由定义
+# 6. RESTful APIs 接口路由定义
 # -------------------------------------------------------------
+
+ANALYTICAL_STRATEGY_KEYS = {
+    "market_temperature", "sector_breadth", "index_support", 
+    "limit_up_streaks", "industry_breadth", "industry_flow_30d", 
+    "concept_flow_30d"
+}
 
 @app.get("/api/strategies", summary="列出所有可用的选股及分析策略")
 def get_all_strategies():
     strategies = load_strategies()
+    filtered_strategies = [
+        {
+            "id": key,
+            "name": val["name"],
+            "description": val["description"]
+        } for key, val in strategies.items() if key not in ANALYTICAL_STRATEGY_KEYS
+    ]
     return JSONResponse(content={
         "status": "success",
-        "count": len(strategies),
-        "strategies": [
-            {
-                "id": key,
-                "name": val["name"],
-                "description": val["description"]
-            } for key, val in strategies.items()
-        ]
+        "count": len(filtered_strategies),
+        "strategies": filtered_strategies
     })
 
 @app.post("/api/strategies", summary="动态增加或修改 SQL 量化选股策略")
@@ -485,6 +553,12 @@ def run_screener(req: ScreenerRequest):
         }
 
     # 规范与整理选股数据列表
+    if 'symbol' not in res_df.columns or 'Close' not in res_df.columns or 'Vol_Ratio' not in res_df.columns:
+        return JSONResponse(status_code=400, content={
+            "status": "error",
+            "message": "执行因子选股失败！您选择的策略非‘个股选股策略’（结果集缺少 symbol, Close 或 Vol_Ratio 列）。大盘情绪与分析数据请直接在‘市场总览’或‘大势分析’选项卡中查看！"
+        })
+
     res_df['Symbol'] = res_df['symbol'].str.upper()
     res_df['Name'] = res_df['symbol'].map(lambda x: names_map.get(x.lower(), ""))
     res_df['Close_Formatted'] = res_df['Close'].map(lambda x: round(float(x), 2))
@@ -520,34 +594,185 @@ def run_screener(req: ScreenerRequest):
     }
 
 # -------------------------------------------------------------
-# 6. HTML 赛博黑暗大势看板动态渲染接口 (GET / /dashboard)
+# 7. Web 交易平台动态同步与查询 API 扩展 (GET/POST)
 # -------------------------------------------------------------
+@app.post("/api/market/sync", summary="触发异步后台多进程数据同步任务")
+def start_market_sync():
+    global sync_task_status
+    if sync_task_status["active"]:
+        return JSONResponse(status_code=400, content={"status": "error", "message": "同步进程已经在运行中！"})
+        
+    # 启动后台线程异步运行同步任务
+    t = threading.Thread(target=async_sync_worker)
+    t.daemon = True
+    t.start()
+    return {"status": "success", "message": "数据同步后台进程已成功拉起，正在同步！"}
 
+@app.get("/api/market/sync/status", summary="查询当前后台数据同步进度及日志控制台")
+def get_market_sync_status():
+    return {
+        "status": "success",
+        "active": sync_task_status["active"],
+        "progress": sync_task_status["progress"],
+        "logs": "".join(sync_task_status["logs"])
+    }
+
+@app.get("/api/market/query", summary="板块与股票双向极速交叉搜索 API")
+def query_stocks_or_sectors(keyword: str):
+    if not keyword or len(keyword.strip()) == 0:
+        return JSONResponse(status_code=400, content={"status": "error", "message": "查询关键词不能为空！"})
+        
+    keyword = keyword.strip()
+    tdx_dir = load_tdx_dir()
+    names_map = load_stock_names(tdx_dir)
+    con = duckdb.connect()
+    
+    # 1. 股票代码/简拼查询所属板块 (例如 600000)
+    if re.match(r'^\d{6}$', keyword) or keyword.lower().startswith(('sh', 'sz', 'bj')):
+        code_only = keyword[-6:] if len(keyword) > 6 else keyword
+        # 查询所属概念
+        sql_c = f"SELECT block_name FROM read_parquet('{BLOCK_MAPPINGS_PATH}') WHERE code = '{code_only}'"
+        df_c = con.execute(sql_c).fetchdf()
+        
+        # 查询所属行业
+        symbol_pattern = f"%{code_only}"
+        sql_i = f"SELECT industry_name FROM read_parquet('{INDUSTRY_MAPPINGS_PATH}') WHERE symbol LIKE '{symbol_pattern}'"
+        df_i = con.execute(sql_i).fetchdf()
+        
+        concepts = df_c['block_name'].tolist()
+        industries = df_i['industry_name'].tolist()
+        symbol_full = [s for s in names_map.keys() if s.endswith(code_only)]
+        stock_name = names_map.get(symbol_full[0], "") if symbol_full else "未知"
+        
+        return {
+            "status": "success",
+            "type": "stock",
+            "symbol": symbol_full[0].upper() if symbol_full else code_only,
+            "name": stock_name,
+            "concepts": concepts,
+            "industries": industries
+        }
+        
+    # 2. 板块名称查询成分股 (例如 半导体 / 华为概念)
+    else:
+        # 模糊查询行业名称
+        sql_i_match = f"SELECT symbol FROM read_parquet('{INDUSTRY_MAPPINGS_PATH}') WHERE industry_name LIKE '%{keyword}%'"
+        df_i_match = con.execute(sql_i_match).fetchdf()
+        
+        # 模糊查询概念名称
+        sql_c_match = f"SELECT market, code FROM read_parquet('{BLOCK_MAPPINGS_PATH}') WHERE block_name LIKE '%{keyword}%'"
+        df_c_match = con.execute(sql_c_match).fetchdf()
+        
+        stocks = []
+        seen = set()
+        
+        # 组装行业匹配
+        for _, row in df_i_match.iterrows():
+            sym = row['symbol'].lower()
+            if sym not in seen:
+                seen.add(sym)
+                stocks.append({"symbol": sym.upper(), "name": names_map.get(sym, "")})
+                
+        # 组装概念匹配
+        for _, row in df_c_match.iterrows():
+            sym = f"{row['market']}{row['code']}".lower()
+            if sym not in seen:
+                seen.add(sym)
+                stocks.append({"symbol": sym.upper(), "name": names_map.get(sym, "")})
+                
+        return {
+            "status": "success",
+            "type": "sector",
+            "query": keyword,
+            "count": len(stocks),
+            "stocks": stocks
+        }
+
+# -------------------------------------------------------------
+# 8. 报告归档列表与 Markdown 内容渲染 APIs (GET)
+# -------------------------------------------------------------
+REPORT_DIR = os.path.join(CURRENT_DIR, "report")
+if not os.path.exists(REPORT_DIR):
+    os.makedirs(REPORT_DIR, exist_ok=True)
+
+@app.get("/api/reports", summary="获取项目目录下的历史量化选股报告列表")
+def list_reports():
+    reports = []
+    if os.path.exists(REPORT_DIR):
+        files = os.listdir(REPORT_DIR)
+        for f in files:
+            if f.endswith(".md") and f not in ["README.md", "README_cn.md", "README_zh.md"]:
+                path = os.path.join(REPORT_DIR, f)
+                stat = os.stat(path)
+                reports.append({
+                    "filename": f,
+                    "size_kb": round(stat.st_size / 1024, 2),
+                    "last_modified": datetime.fromtimestamp(stat.st_mtime).strftime('%Y-%m-%d %H:%M:%S')
+                })
+            
+    # 按照最近修改时间倒序
+    reports.sort(key=lambda x: x["last_modified"], reverse=True)
+    return {
+        "status": "success",
+        "count": len(reports),
+        "reports": reports
+    }
+
+@app.get("/api/reports/content", summary="读取指定 Markdown 选股报告的源码内容")
+def get_report_content(filename: str):
+    # 安全验证，防止目录穿越攻击
+    safe_filename = os.path.basename(filename)
+    if not safe_filename.endswith(".md") or safe_filename in ["README.md"]:
+         return JSONResponse(status_code=400, content={"status": "error", "message": "非法或受限的文件名称！"})
+         
+    path = os.path.join(REPORT_DIR, safe_filename)
+    if not os.path.exists(path):
+         return JSONResponse(status_code=404, content={"status": "error", "message": f"报告文件 {safe_filename} 不存在！"})
+         
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            content = f.read()
+        return {
+            "status": "success",
+            "filename": safe_filename,
+            "content": content
+        }
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"status": "error", "message": f"读取失败: {e}"})
+
+# -------------------------------------------------------------
+# 9. 动态托管 HTML 赛博看板 (GET /)
+# -------------------------------------------------------------
 @app.get("/", response_class=HTMLResponse, summary="动态读取并渲染赛博大势看板仪表盘(完美免除CORS)")
 @app.get("/dashboard", response_class=HTMLResponse)
 def get_dashboard():
-    # 1. 动态生成最新市场大势与情绪数据
     try:
         market_data = get_market_data()
     except Exception as e:
         return HTMLResponse(content=f"<h1>❌ 市场数据链算失败: {e}</h1>", status_code=500)
 
-    # 2. 读取本地看板模版文件
     if not os.path.exists(HTML_TEMPLATE_PATH):
         return HTMLResponse(content=f"<h1>❌ 错误: 板板模版 {HTML_TEMPLATE_PATH} 不存在！</h1>", status_code=404)
         
     try:
         with open(HTML_TEMPLATE_PATH, "r", encoding="utf-8") as f:
             template = f.read()
-            
-        # 3. 动态字符串替换注入，零CORS限制！
         html_rendered = template.replace("__MARKET_DATA_JSON__", json.dumps(market_data, ensure_ascii=False))
         return HTMLResponse(content=html_rendered)
     except Exception as e:
         return HTMLResponse(content=f"<h1>❌ 服务端看板渲染失败: {e}</h1>", status_code=500)
 
 # -------------------------------------------------------------
-# 7. Web 后端启动入口
+# 10. 静态挂载 Web 主独立网页门户文件夹
+# -------------------------------------------------------------
+web_folder_path = os.path.join(CURRENT_DIR, "web")
+if not os.path.exists(web_folder_path):
+    os.makedirs(web_folder_path, exist_ok=True)
+    
+app.mount("/web", StaticFiles(directory=web_folder_path), name="web")
+
+# -------------------------------------------------------------
+# 11. Web 后端启动入口
 # -------------------------------------------------------------
 if __name__ == "__main__":
     print("=" * 80)

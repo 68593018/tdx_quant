@@ -231,7 +231,10 @@ def main():
         print("=" * 90)
         
         # 保存 Markdown 报告
-        report_path = os.path.join(CURRENT_DIR, f"{strategy_key}_report.md")
+        report_dir = os.path.join(CURRENT_DIR, "report")
+        os.makedirs(report_dir, exist_ok=True)
+        date_suffix = latest_date_str.replace("-", "")
+        report_path = os.path.join(report_dir, f"{strategy_key}_report_{date_suffix}.md")
         try:
             md_content = f"""# 🚀 全市场资金共振突破选股报告
 
@@ -358,8 +361,10 @@ def main():
         print("=" * 90)
         
         # 导出多策略交集 Markdown 报告
-        report_filename = "dual_intersection_report.md"
-        report_path = os.path.join(CURRENT_DIR, report_filename)
+        report_dir = os.path.join(CURRENT_DIR, "report")
+        os.makedirs(report_dir, exist_ok=True)
+        date_suffix = latest_date_str.replace("-", "")
+        report_path = os.path.join(report_dir, f"dual_intersection_report_{date_suffix}.md")
         try:
             md_content = f"""# 🚀 全市场多策略融合黄金交集选股报告
 
