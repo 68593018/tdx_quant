@@ -374,7 +374,9 @@
                                     <td class="py-3.5 px-4 font-semibold">{{ stk.name || '--' }}</td>
                                     <td class="py-3.5 px-4 text-right font-mono font-bold">{{ stk.close }} 元</td>
                                     <td class="py-3.5 px-4 text-right font-mono text-cyber-primary">{{ stk.vol_ratio }} 倍</td>
-                                    <td class="py-3.5 px-4 text-right font-mono text-cyber-up font-bold">+{{ stk.dev_ma20_pct }}%</td>
+                                    <td :class="['py-3.5 px-4 text-right font-mono font-bold', stk.dev_ma20_pct > 0 ? 'text-cyber-up' : (stk.dev_ma20_pct < 0 ? 'text-cyber-down' : 'text-cyber-textMuted')]">
+                                        {{ stk.dev_ma20_pct > 0 ? '+' : '' }}{{ stk.dev_ma20_pct }}%
+                                    </td>
                                     <td class="py-3.5 px-4 text-cyber-textMuted font-medium leading-relaxed max-w-[280px] truncate" :title="stk.sectors">{{ stk.sectors }}</td>
                                 </tr>
                                 <tr v-if="!screenerResult.stocks || screenerResult.stocks.length === 0">
