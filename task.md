@@ -49,3 +49,12 @@
 - `[x]` 更新 `analyzer.py` 中的 HTML 大屏模板，增加极奢赛博风格的 30 日资金时序折线图（双 tab，支持绝对量与相对占比切换）
 - `[x]` 运行并检验系统，确保在 15-20 秒内极速算完，并将生成的报告与看板网页同步到 brain 文件夹
 - `[x]` 将项目所有更新提交并同步推送到远程 GitHub 仓库
+
+## Phase 7: B/S Web 量化交易平台后端与 API 服务底座 (已完成)
+- `[x]` 在 `server.py` 中使用 FastAPI + Uvicorn 搭建独立量化交易 Web 服务器，具备静默自检依赖功能
+- `[x]` 托管 `GET /` 与 `GET /dashboard` 路由，动态注入最新市场大势与情绪 JSON 并渲染免 CORS 看板
+- `[x]` 编写动态大势与情绪 RESTful API `GET /api/market/data`（整合 7 大模块，设置 15 秒极速缓存防止穿透）
+- `[x]` 编写多因子选股 API `POST /api/screener/run`（支持多策略动态计算、去噪求交集及股票中文名智能映射）
+- `[x]` 编写策略列表接口 `GET /api/strategies` 和策略保存接口 `POST /api/strategies`，实现动态策略持久化
+- `[x]` 本地运行服务并进行完整 curl 测试，成功实现 B/S 平台的高并发行情及选股动态服务，并在系统重启后成功复活服务进程
+- `[x]` 将项目所有更新提交并同步推送到远程 GitHub 仓库
