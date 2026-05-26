@@ -308,13 +308,26 @@
                 <!-- 右边选股结果展示 -->
                 <div class="glass-card rounded-2xl p-6 lg:col-span-3 space-y-6 relative overflow-hidden">
                     
-                    <div class="flex items-center justify-between border-b border-white/5 pb-3">
+                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-white/5 pb-3">
                         <div class="text-sm font-semibold flex items-center gap-2">
                             <span>🏆</span> 选股计算终端 (交集股票池)
+                            <span v-if="screenerResult.count !== undefined" class="px-2 py-0.5 bg-cyber-primary/10 border border-cyber-primary/30 text-cyber-primary rounded-full text-[10px] font-mono font-bold select-none">
+                                共 {{ screenerResult.count }} 只个股
+                            </span>
                         </div>
-                        <div v-if="screenerResult.count !== undefined" class="text-xs text-cyber-textMuted flex items-center gap-3 font-mono">
-                            <span>选股耗时: <b class="text-cyber-primary">{{ screenerResult.compute_time_seconds }}s</b></span>
-                            <span>选出个股: <b class="text-cyber-primary">{{ screenerResult.count }}</b> 只</span>
+                        <div class="flex items-center gap-3">
+                            <div v-if="screenerResult.count !== undefined" class="text-[10px] text-cyber-textMuted flex items-center gap-1.5 font-mono">
+                                <span>耗时: <b class="text-cyber-primary font-bold">{{ screenerResult.compute_time_seconds }}s</b></span>
+                            </div>
+                            <!-- 生成选股报告按钮 -->
+                            <button v-if="screenerResult.count !== undefined" 
+                                    @click="generateScreenerReport" 
+                                    :disabled="isOffline || reportGenerating || screenerResult.count === 0"
+                                    class="px-3 py-1.5 bg-cyber-primary/15 border border-cyber-primary/40 hover:bg-cyber-primary/30 text-cyber-primary rounded-lg text-[10px] font-semibold flex items-center gap-1.5 transition-all select-none disabled:opacity-30 disabled:cursor-not-allowed">
+                                <span v-if="reportGenerating" class="w-2.5 h-2.5 border-2 border-cyber-primary border-t-transparent rounded-full animate-spin"></span>
+                                <span v-else>📄</span>
+                                <span>生成 Markdown 报告</span>
+                            </button>
                         </div>
                     </div>
 
@@ -700,6 +713,7 @@
                 const screenerCategories = ref(["stock"]);
                 const screenerLoading = ref(false);
                 const screenerResult = ref({});
+                const reportGenerating = ref(false);
                 const overviewLoading = ref(false);
 
                 // 2. 市场大势 state
@@ -1012,6 +1026,37 @@
                     }
                 };
 
+                const generateScreenerReport = async () => {
+                    if (isOffline.value || screenerKeys.value.length === 0) return;
+                    reportGenerating.value = true;
+                    try {
+                        const res = await fetch("/api/screener/save_report", {
+                            method: "POST",
+                            headers: {
+                                "Content-Type": "application/json"
+                            },
+                            body: JSON.stringify({
+                                strategies: screenerKeys.value,
+                                categories: screenerCategories.value
+                            })
+                        });
+                        const data = await res.json();
+                        if (data.status === "success") {
+                            alert(`🎉 选股报告生成成功！\n已保存至 report/${data.filename}\n请在“报告归档”选项卡中查阅！`);
+                            if (typeof loadReportsList === "function") {
+                                await loadReportsList();
+                            }
+                        } else {
+                            alert(`❌ 生成报告失败: ${data.message}`);
+                        }
+                    } catch (e) {
+                        console.error("生成报告出错", e);
+                        alert(`❌ 生成报告出错: ${e}`);
+                    } finally {
+                        reportGenerating.value = false;
+                    }
+                };
+
                 // 5. 数据同步
                 const triggerSync = async () => {
                     if (isOffline.value || syncStatus.value.active) return;
@@ -1115,8 +1160,10 @@
                     screenerCategories,
                     screenerLoading,
                     screenerResult,
+                    reportGenerating,
                     saveStrategy,
                     runScreener,
+                    generateScreenerReport,
                     
                     // 大势 state 与 methods
                     marketData,

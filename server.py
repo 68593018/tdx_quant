@@ -678,6 +678,179 @@ def run_screener(req: ScreenerRequest):
         "stocks": stocks_list
     }
 
+@app.post("/api/screener/save_report", summary="生成并保存选股报告到report文件夹中")
+def save_screener_report(req: ScreenerRequest):
+    if not req.strategies:
+        return JSONResponse(status_code=400, content={"status": "error", "message": "必须指定至少一个选股策略名称！"})
+        
+    tdx_dir = load_tdx_dir()
+    names_map = load_stock_names(tdx_dir)
+    strategies = load_strategies()
+    
+    # 策略合法性检测
+    invalid_keys = [k for k in req.strategies if k not in strategies]
+    if invalid_keys:
+        return JSONResponse(status_code=400, content={"status": "error", "message": f"未定义的策略: {invalid_keys}"})
+
+    try:
+        patterns_str = get_parquet_patterns()
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+
+    # DuckDB 并行计算连接
+    con = duckdb.connect()
+    con.execute(f"SET threads = {os.cpu_count()}")
+
+    import pandas as pd
+    dfs = []
+    
+    try:
+        categories = req.categories if req.categories is not None else ["stock"]
+        category_filter = generate_category_filter(categories)
+        
+        for key in req.strategies:
+            sql = strategies[key]["query_sql"]\
+                .replace("__DATA_STORE_DIR__", DATA_STORE_DIR)\
+                .replace("__PATTERNS_STR__", patterns_str)\
+                .replace("__BLOCK_MAPPINGS_PATH__", BLOCK_MAPPINGS_PATH)\
+                .replace("__INDUSTRY_MAPPINGS_PATH__", INDUSTRY_MAPPINGS_PATH)\
+                .replace("__CATEGORY_FILTER__", category_filter)
+            
+            df = con.execute(sql).fetchdf()
+            dfs.append(df)
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"status": "error", "message": f"执行策略 SQL 失败: {e}"})
+
+    # 多策略结果求交集
+    res_df = None
+    if dfs:
+        res_df = dfs[0]
+        for next_df in dfs[1:]:
+            res_df = pd.merge(res_df, next_df, on='symbol', suffixes=('', '_other'))
+
+    # 获取最新交易日
+    try:
+        latest_date_df = con.execute(f"SELECT MAX(date) AS mdate FROM read_parquet('{DATA_STORE_DIR}/sh600000.parquet')").fetchdf()
+        latest_date_str = latest_date_df['mdate'].iloc[0].strftime('%Y-%m-%d')
+    except Exception:
+        latest_date_str = datetime.now().strftime('%Y-%m-%d')
+
+    date_suffix = latest_date_str.replace("-", "")
+    report_dir = os.path.join(CURRENT_DIR, "report")
+    os.makedirs(report_dir, exist_ok=True)
+
+    # 判断是单策略还是多策略融合
+    if len(req.strategies) == 1:
+        strategy_key = req.strategies[0]
+        filename = f"{strategy_key}_report_{date_suffix}.md"
+        report_path = os.path.join(report_dir, filename)
+        
+        # 格式化数据
+        if res_df is not None and not res_df.empty:
+            res_df['Symbol'] = res_df['symbol'].str.upper()
+            res_df['Name'] = res_df['symbol'].map(lambda x: names_map.get(x.lower(), ""))
+            res_df['Close_Formatted'] = res_df['Close'].map(lambda x: round(float(x), 2))
+            res_df['Vol_Ratio_Formatted'] = res_df['Vol_Ratio'].map(lambda x: round(float(x), 2))
+            res_df['Dev_MA20_Pct_Formatted'] = res_df['Dev_MA20_Pct'].map(lambda x: round(float(x), 2))
+            
+            # Extract 5th column dynamically
+            fifth_col = res_df.columns[4]
+            res_df['Resonance_Sectors'] = res_df[fifth_col]
+        
+        md_content = f"""# 🚀 全市场资金共振突破选股报告
+
+**策略名称**：`{strategies[strategy_key]['name']}`
+**策略描述**：{strategies[strategy_key]['description']}
+**分析交易日**：`{latest_date_str}`
+**分析标的总数**：`{len(os.listdir(DATA_STORE_DIR))} 个`
+**报告生成时间**：`{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}`
+
+---
+
+## 🏆 黄金共振突破股列表
+共筛选出 **{len(res_df) if res_df is not None else 0}** 只黄金个股，已按今日放量倍数降序排列：
+
+| 序号 | 股票代码 | 股票名称 | 最新收盘价 | 今日放量倍数 | MA20 偏离度 | 触发共振爆发板块（突破只数/板块总股数占比） |
+| :---: | :---: | :---: | :---: | :---: | :---: | :--- |
+"""
+        if res_df is not None and not res_df.empty:
+            for idx, row in res_df.reset_index(drop=True).iterrows():
+                md_content += f"| {idx+1} | `{row['Symbol']}` | {row['Name']} | {row['Close_Formatted']} | {row['Vol_Ratio_Formatted']} | {row['Dev_MA20_Pct_Formatted']} | {row['Resonance_Sectors']} |\n"
+        else:
+            md_content += "| -- | -- | -- | -- | -- | -- | 暂无筛选结果 |\n"
+            
+        md_content += """
+---
+
+## 💡 选股策略释义
+> [!NOTE]
+> * **策略核心**：本选股结果完全由 `strategies.json` 配置文件中的 SQL 逻辑驱动，完美实现了算法与源码的分离。
+> * **行业共振**：统计每个概念板块中，当天有多少只股票同时触发该策略突破。**只保留其所属板块中“当天至少有 3 只股票同时突破”的成分股**，并计算出突破只数占该板块总股数的比例，完美锁定主力资金最抱团、集聚突破度（Breadth）最高的核心市场风口！
+"""
+    else:
+        # 多策略融合
+        filename = f"dual_intersection_report_{date_suffix}.md"
+        report_path = os.path.join(report_dir, filename)
+        
+        if res_df is not None and not res_df.empty:
+            res_df['Symbol'] = res_df['symbol'].str.upper()
+            res_df['Name'] = res_df['symbol'].map(lambda x: names_map.get(x.lower(), ""))
+            res_df['Close_Formatted'] = res_df['Close'].map(lambda x: round(float(x), 2))
+            res_df['Vol_Ratio_Formatted'] = res_df['Vol_Ratio'].map(lambda x: round(float(x), 2))
+            res_df['Dev_MA20_Pct_Formatted'] = res_df['Dev_MA20_Pct'].map(lambda x: round(float(x), 2))
+            
+            sector_cols = [c for c in res_df.columns if c.startswith('Resonance_Sectors')]
+            def merge_sectors(row):
+                sectors = []
+                for col in sector_cols:
+                    if pd.notnull(row[col]):
+                        sectors.extend([s.strip() for s in row[col].split(',')])
+                return ", ".join(sorted(list(set(sectors))))
+            res_df['Merged_Sectors'] = res_df.apply(merge_sectors, axis=1)
+
+        md_content = f"""# 🚀 全市场多策略融合黄金交集选股报告
+
+**分析交易日**：`{latest_date_str}`
+**参与融合的策略列表**：
+"""
+        for key in req.strategies:
+            md_content += f"* 🔹 **{strategies[key]['name']}**：{strategies[key]['description']}\n"
+            
+        md_content += f"""**报告生成时间**：`{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}`
+
+---
+
+## 🏆 黄金多重共振交集股列表
+本列表中的个股**必须同时百分之百满足以上所有选股策略**，代表了市场中最强悍的量化共鸣点：
+
+| 序号 | 股票代码 | 股票名称 | 最新收盘价 | 今日放量倍数 | MA20 偏离度 | 综合触发共振板块（突破只数/占比） |
+| :---: | :---: | :---: | :---: | :---: | :---: | :--- |
+"""
+        if res_df is not None and not res_df.empty:
+            for idx, row in res_df.reset_index(drop=True).iterrows():
+                md_content += f"| {idx+1} | `{row['Symbol']}` | {row['Name']} | {row['Close_Formatted']} | {row['Vol_Ratio_Formatted']} | {row['Dev_MA20_Pct_Formatted']} | {row['Merged_Sectors']} |\n"
+        else:
+            md_content += "| -- | -- | -- | -- | -- | -- | 暂无筛选结果 |\n"
+            
+        md_content += """
+---
+
+## 💡 多策略融合（Strategy Fusion）释义
+> [!IMPORTANT]
+> * **黄金交集（Intersection）原理**：在量化实战中，单个策略往往容易受到噪音干扰。我们通过对**独立多策略的选股结果在 Python 层进行 inner join 求取交集**，强力过滤掉不合规的杂音，只保留了在**均线形态（Trend）、资金量能（Volume）以及板块集聚爆发（Sector Breadth）**三大周期上形成全面多头共鸣的极致黑马个股。
+"""
+
+    try:
+        with open(report_path, "w", encoding="utf-8") as f:
+            f.write(md_content)
+        return {
+            "status": "success",
+            "message": f"报告保存成功：{filename}",
+            "filename": filename
+        }
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"status": "error", "message": f"写入报告失败: {e}"})
+
 # -------------------------------------------------------------
 # 7. Web 交易平台动态同步与查询 API 扩展 (GET/POST)
 # -------------------------------------------------------------
