@@ -364,6 +364,8 @@
                                     <th class="py-3.5 px-4 text-right">收盘价</th>
                                     <th class="py-3.5 px-4 text-right">今日放量</th>
                                     <th class="py-3.5 px-4 text-right">MA20偏离度</th>
+                                    <th class="py-3.5 px-4 text-right">MA20斜率(5日)</th>
+                                    <th class="py-3.5 px-4 text-right">MA30斜率(5日)</th>
                                     <th class="py-3.5 px-4">共振触发板块 (只/占比%)</th>
                                 </tr>
                             </thead>
@@ -376,6 +378,12 @@
                                     <td class="py-3.5 px-4 text-right font-mono text-cyber-primary">{{ stk.vol_ratio }} 倍</td>
                                     <td :class="['py-3.5 px-4 text-right font-mono font-bold', stk.dev_ma20_pct > 0 ? 'text-cyber-up' : (stk.dev_ma20_pct < 0 ? 'text-cyber-down' : 'text-cyber-textMuted')]">
                                         {{ stk.dev_ma20_pct > 0 ? '+' : '' }}{{ stk.dev_ma20_pct }}%
+                                    </td>
+                                    <td :class="['py-3.5 px-4 text-right font-mono font-bold', stk.slope_ma20 > 0 ? 'text-cyber-up' : (stk.slope_ma20 < 0 ? 'text-cyber-down' : 'text-cyber-textMuted')]">
+                                        {{ stk.slope_ma20 > 0 ? '+' : '' }}{{ stk.slope_ma20 }}%
+                                    </td>
+                                    <td :class="['py-3.5 px-4 text-right font-mono font-bold', stk.slope_ma30 > 0 ? 'text-cyber-up' : (stk.slope_ma30 < 0 ? 'text-cyber-down' : 'text-cyber-textMuted')]">
+                                        {{ stk.slope_ma30 > 0 ? '+' : '' }}{{ stk.slope_ma30 }}%
                                     </td>
                                     <td class="py-3.5 px-4 text-cyber-textMuted font-medium leading-relaxed max-w-[280px] truncate" :title="stk.sectors">{{ stk.sectors }}</td>
                                 </tr>

@@ -578,6 +578,70 @@ def get_market_data(refresh: bool = False):
     
     return full_data
 
+def calculate_slopes_for_symbols(con, symbols: list[str], patterns_str: str, data_store_dir: str) -> dict:
+    """极速为选中的股票计算5日MA20与MA30的百分比变动斜率"""
+    if not symbols:
+        return {}
+    
+    # 格式化为 SQL IN 表达式需要的 lowercase 列表
+    symbols_lower = [s.lower() for s in symbols]
+    symbols_str = ", ".join([f"'{s}'" for s in symbols_lower])
+    
+    sql = f"""
+    WITH raw_data AS (
+        SELECT 
+            regexp_extract(filename, '([^/]+)[.]parquet$', 1) AS symbol,
+            date,
+            close_adj
+        FROM read_parquet([{patterns_str}], filename=true)
+        WHERE regexp_extract(filename, '([^/]+)[.]parquet$', 1) IN ({symbols_str})
+    ),
+    calculated AS (
+        SELECT 
+            symbol,
+            date,
+            close_adj,
+            AVG(close_adj) OVER (PARTITION BY symbol ORDER BY date ROWS BETWEEN 19 PRECEDING AND CURRENT ROW) AS ma20,
+            AVG(close_adj) OVER (PARTITION BY symbol ORDER BY date ROWS BETWEEN 29 PRECEDING AND CURRENT ROW) AS ma30,
+            ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY date DESC) AS rn
+        FROM raw_data
+    ),
+    latest_data AS (
+        SELECT 
+            symbol,
+            ma20 AS ma20_today,
+            ma30 AS ma30_today
+        FROM calculated
+        WHERE rn = 1
+    ),
+    prev_data AS (
+        SELECT 
+            symbol,
+            ma20 AS ma20_prev,
+            ma30 AS ma30_prev
+        FROM calculated
+        WHERE rn = 6
+    )
+    SELECT 
+        l.symbol,
+        (l.ma20_today - coalesce(p.ma20_prev, l.ma20_today)) / coalesce(p.ma20_prev, l.ma20_today) * 100 AS slope_ma20,
+        (l.ma30_today - coalesce(p.ma30_prev, l.ma30_today)) / coalesce(p.ma30_prev, l.ma30_today) * 100 AS slope_ma30
+    FROM latest_data l
+    LEFT JOIN prev_data p ON l.symbol = p.symbol
+    """
+    try:
+        df = con.execute(sql).fetchdf()
+        slopes_map = {}
+        for _, r in df.iterrows():
+            slopes_map[r['symbol'].lower()] = {
+                "slope_ma20": round(float(r['slope_ma20']), 2) if pd.notnull(r['slope_ma20']) else 0.0,
+                "slope_ma30": round(float(r['slope_ma30']), 2) if pd.notnull(r['slope_ma30']) else 0.0
+            }
+        return slopes_map
+    except Exception as e:
+        print(f"⚠️ 计算斜率失败: {e}")
+        return {}
+
 @app.post("/api/screener/run", summary="极速计算并获取多因子策略选股名册")
 def run_screener(req: ScreenerRequest):
     if not req.strategies:
@@ -664,14 +728,22 @@ def run_screener(req: ScreenerRequest):
         
     res_df['Merged_Sectors'] = res_df.apply(merge_sectors, axis=1)
     
+    # 极速计算选中股票的 MA20/MA30 变动斜率 (5日变化百分比)
+    selected_symbols = res_df['symbol'].tolist()
+    slopes_map = calculate_slopes_for_symbols(con, selected_symbols, patterns_str, DATA_STORE_DIR)
+    
     stocks_list = []
     for _, row in res_df.iterrows():
+        sym_lower = row['symbol'].lower()
+        slopes = slopes_map.get(sym_lower, {"slope_ma20": 0.0, "slope_ma30": 0.0})
         stocks_list.append({
             "symbol": row['Symbol'],
             "name": row['Name'],
             "close": row['Close_Formatted'],
             "vol_ratio": row['Vol_Ratio_Formatted'],
             "dev_ma20_pct": row['Dev_MA20_Pct_Formatted'],
+            "slope_ma20": slopes["slope_ma20"],
+            "slope_ma30": slopes["slope_ma30"],
             "sectors": row['Merged_Sectors']
         })
 
@@ -747,6 +819,10 @@ def save_screener_report(req: ScreenerRequest):
     report_dir = os.path.join(CURRENT_DIR, "report")
     os.makedirs(report_dir, exist_ok=True)
 
+    # 极速计算选中股票的 MA20/MA30 变动斜率 (5日变化百分比)
+    selected_symbols = res_df['symbol'].tolist() if res_df is not None and not res_df.empty else []
+    slopes_map = calculate_slopes_for_symbols(con, selected_symbols, patterns_str, DATA_STORE_DIR)
+
     # 判断是单策略还是多策略融合
     if len(req.strategies) == 1:
         strategy_key = req.strategies[0]
@@ -778,14 +854,20 @@ def save_screener_report(req: ScreenerRequest):
 ## 🏆 黄金共振突破股列表
 共筛选出 **{len(res_df) if res_df is not None else 0}** 只黄金个股，已按今日放量倍数降序排列：
 
-| 序号 | 股票代码 | 股票名称 | 最新收盘价 | 今日放量倍数 | MA20 偏离度 | 触发共振爆发板块（突破只数/板块总股数占比） |
-| :---: | :---: | :---: | :---: | :---: | :---: | :--- |
+| 序号 | 股票代码 | 股票名称 | 最新收盘价 | 今日放量倍数 | MA20 偏离度 | MA20斜率(5日) | MA30斜率(5日) | 触发共振爆发板块（突破只数/板块总股数占比） |
+| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :--- |
 """
         if res_df is not None and not res_df.empty:
             for idx, row in res_df.reset_index(drop=True).iterrows():
-                md_content += f"| {idx+1} | `{row['Symbol']}` | {row['Name']} | {row['Close_Formatted']} | {row['Vol_Ratio_Formatted']} | {row['Dev_MA20_Pct_Formatted']} | {row['Resonance_Sectors']} |\n"
+                sym_lower = row['symbol'].lower()
+                slopes = slopes_map.get(sym_lower, {"slope_ma20": 0.0, "slope_ma30": 0.0})
+                s_ma20 = f"+{slopes['slope_ma20']}%" if slopes['slope_ma20'] > 0 else f"{slopes['slope_ma20']}%"
+                s_ma30 = f"+{slopes['slope_ma30']}%" if slopes['slope_ma30'] > 0 else f"{slopes['slope_ma30']}%"
+                dev_val = row['Dev_MA20_Pct_Formatted']
+                dev_sign = "+" if dev_val > 0 else ""
+                md_content += f"| {idx+1} | `{row['Symbol']}` | {row['Name']} | {row['Close_Formatted']} | {row['Vol_Ratio_Formatted']} | {dev_sign}{dev_val}% | {s_ma20} | {s_ma30} | {row['Resonance_Sectors']} |\n"
         else:
-            md_content += "| -- | -- | -- | -- | -- | -- | 暂无筛选结果 |\n"
+            md_content += "| -- | -- | -- | -- | -- | -- | -- | -- | 暂无筛选结果 |\n"
             
         md_content += """
 ---
@@ -831,14 +913,20 @@ def save_screener_report(req: ScreenerRequest):
 ## 🏆 黄金多重共振交集股列表
 本列表中的个股**必须同时百分之百满足以上所有选股策略**，代表了市场中最强悍的量化共鸣点：
 
-| 序号 | 股票代码 | 股票名称 | 最新收盘价 | 今日放量倍数 | MA20 偏离度 | 综合触发共振板块（突破只数/占比） |
-| :---: | :---: | :---: | :---: | :---: | :---: | :--- |
+| 序号 | 股票代码 | 股票名称 | 最新收盘价 | 今日放量倍数 | MA20 偏离度 | MA20斜率(5日) | MA30斜率(5日) | 综合触发共振板块（突破只数/占比） |
+| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :--- |
 """
         if res_df is not None and not res_df.empty:
             for idx, row in res_df.reset_index(drop=True).iterrows():
-                md_content += f"| {idx+1} | `{row['Symbol']}` | {row['Name']} | {row['Close_Formatted']} | {row['Vol_Ratio_Formatted']} | {row['Dev_MA20_Pct_Formatted']} | {row['Merged_Sectors']} |\n"
+                sym_lower = row['symbol'].lower()
+                slopes = slopes_map.get(sym_lower, {"slope_ma20": 0.0, "slope_ma30": 0.0})
+                s_ma20 = f"+{slopes['slope_ma20']}%" if slopes['slope_ma20'] > 0 else f"{slopes['slope_ma20']}%"
+                s_ma30 = f"+{slopes['slope_ma30']}%" if slopes['slope_ma30'] > 0 else f"{slopes['slope_ma30']}%"
+                dev_val = row['Dev_MA20_Pct_Formatted']
+                dev_sign = "+" if dev_val > 0 else ""
+                md_content += f"| {idx+1} | `{row['Symbol']}` | {row['Name']} | {row['Close_Formatted']} | {row['Vol_Ratio_Formatted']} | {dev_sign}{dev_val}% | {s_ma20} | {s_ma30} | {row['Merged_Sectors']} |\n"
         else:
-            md_content += "| -- | -- | -- | -- | -- | -- | 暂无筛选结果 |\n"
+            md_content += "| -- | -- | -- | -- | -- | -- | -- | -- | 暂无筛选结果 |\n"
             
         md_content += """
 ---
