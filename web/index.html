@@ -358,19 +358,83 @@
                         <table class="w-full border-collapse">
                             <thead>
                                 <tr class="bg-cyber-card text-left text-xs font-semibold text-cyber-textMuted border-b border-cyber-border">
-                                    <th class="py-3.5 px-4 text-center">序号</th>
-                                    <th class="py-3.5 px-4">股票代码</th>
-                                    <th class="py-3.5 px-4">股票名称</th>
-                                    <th class="py-3.5 px-4 text-right">收盘价</th>
-                                    <th class="py-3.5 px-4 text-right">今日放量</th>
-                                    <th class="py-3.5 px-4 text-right">MA20偏离度</th>
-                                    <th class="py-3.5 px-4 text-right">MA20斜率(5日)</th>
-                                    <th class="py-3.5 px-4 text-right">MA30斜率(5日)</th>
-                                    <th class="py-3.5 px-4">共振触发板块 (只/占比%)</th>
+                                    <th class="py-3.5 px-4 text-center select-none w-16">序号</th>
+                                    <th @click="sortBy('symbol')" class="py-3.5 px-4 cursor-pointer hover:text-white select-none transition-colors">
+                                        <div class="flex items-center gap-1">
+                                            <span>股票代码</span>
+                                            <span v-if="sortKey === 'symbol'" class="text-[10px] text-cyber-primary font-mono select-none">
+                                                {{ sortOrder === 'asc' ? '▲' : '▼' }}
+                                            </span>
+                                            <span v-else class="text-[10px] text-white/20 font-mono select-none">⇅</span>
+                                        </div>
+                                    </th>
+                                    <th @click="sortBy('name')" class="py-3.5 px-4 cursor-pointer hover:text-white select-none transition-colors">
+                                        <div class="flex items-center gap-1">
+                                            <span>股票名称</span>
+                                            <span v-if="sortKey === 'name'" class="text-[10px] text-cyber-primary font-mono select-none">
+                                                {{ sortOrder === 'asc' ? '▲' : '▼' }}
+                                            </span>
+                                            <span v-else class="text-[10px] text-white/20 font-mono select-none">⇅</span>
+                                        </div>
+                                    </th>
+                                    <th @click="sortBy('close')" class="py-3.5 px-4 text-right cursor-pointer hover:text-white select-none transition-colors">
+                                        <div class="flex items-center justify-end gap-1">
+                                            <span>收盘价</span>
+                                            <span v-if="sortKey === 'close'" class="text-[10px] text-cyber-primary font-mono select-none">
+                                                {{ sortOrder === 'asc' ? '▲' : '▼' }}
+                                            </span>
+                                            <span v-else class="text-[10px] text-white/20 font-mono select-none">⇅</span>
+                                        </div>
+                                    </th>
+                                    <th @click="sortBy('vol_ratio')" class="py-3.5 px-4 text-right cursor-pointer hover:text-white select-none transition-colors">
+                                        <div class="flex items-center justify-end gap-1">
+                                            <span>今日放量</span>
+                                            <span v-if="sortKey === 'vol_ratio'" class="text-[10px] text-cyber-primary font-mono select-none">
+                                                {{ sortOrder === 'asc' ? '▲' : '▼' }}
+                                            </span>
+                                            <span v-else class="text-[10px] text-white/20 font-mono select-none">⇅</span>
+                                        </div>
+                                    </th>
+                                    <th @click="sortBy('dev_ma20_pct')" class="py-3.5 px-4 text-right cursor-pointer hover:text-white select-none transition-colors">
+                                        <div class="flex items-center justify-end gap-1">
+                                            <span>MA20偏离度</span>
+                                            <span v-if="sortKey === 'dev_ma20_pct'" class="text-[10px] text-cyber-primary font-mono select-none">
+                                                {{ sortOrder === 'asc' ? '▲' : '▼' }}
+                                            </span>
+                                            <span v-else class="text-[10px] text-white/20 font-mono select-none">⇅</span>
+                                        </div>
+                                    </th>
+                                    <th @click="sortBy('slope_ma20')" class="py-3.5 px-4 text-right cursor-pointer hover:text-white select-none transition-colors">
+                                        <div class="flex items-center justify-end gap-1">
+                                            <span>MA20斜率(5日)</span>
+                                            <span v-if="sortKey === 'slope_ma20'" class="text-[10px] text-cyber-primary font-mono select-none">
+                                                {{ sortOrder === 'asc' ? '▲' : '▼' }}
+                                            </span>
+                                            <span v-else class="text-[10px] text-white/20 font-mono select-none">⇅</span>
+                                        </div>
+                                    </th>
+                                    <th @click="sortBy('slope_ma30')" class="py-3.5 px-4 text-right cursor-pointer hover:text-white select-none transition-colors">
+                                        <div class="flex items-center justify-end gap-1">
+                                            <span>MA30斜率(5日)</span>
+                                            <span v-if="sortKey === 'slope_ma30'" class="text-[10px] text-cyber-primary font-mono select-none">
+                                                {{ sortOrder === 'asc' ? '▲' : '▼' }}
+                                            </span>
+                                            <span v-else class="text-[10px] text-white/20 font-mono select-none">⇅</span>
+                                        </div>
+                                    </th>
+                                    <th @click="sortBy('sectors')" class="py-3.5 px-4 cursor-pointer hover:text-white select-none transition-colors">
+                                        <div class="flex items-center gap-1">
+                                            <span>共振触发板块 (只/占比%)</span>
+                                            <span v-if="sortKey === 'sectors'" class="text-[10px] text-cyber-primary font-mono select-none">
+                                                {{ sortOrder === 'asc' ? '▲' : '▼' }}
+                                            </span>
+                                            <span v-else class="text-[10px] text-white/20 font-mono select-none">⇅</span>
+                                        </div>
+                                    </th>
                                 </tr>
                             </thead>
                             <tbody class="divide-y divide-white/2 bg-cyber-surface/10 text-xs">
-                                <tr v-for="(stk, index) in screenerResult.stocks" :key="stk.symbol" class="hover:bg-white/2 transition-colors">
+                                <tr v-for="(stk, index) in sortedStocks" :key="stk.symbol" class="hover:bg-white/2 transition-colors">
                                     <td class="py-3.5 px-4 text-center text-cyber-textMuted font-mono">{{ index + 1 }}</td>
                                     <td class="py-3.5 px-4 font-mono font-bold text-white tracking-wide">{{ stk.symbol }}</td>
                                     <td class="py-3.5 px-4 font-semibold">{{ stk.name || '--' }}</td>
@@ -387,8 +451,8 @@
                                     </td>
                                     <td class="py-3.5 px-4 text-cyber-textMuted font-medium leading-relaxed max-w-[280px] truncate" :title="stk.sectors">{{ stk.sectors }}</td>
                                 </tr>
-                                <tr v-if="!screenerResult.stocks || screenerResult.stocks.length === 0">
-                                    <td colspan="7" class="py-16 text-center text-cyber-textMuted text-xs leading-loose">
+                                <tr v-if="!sortedStocks || sortedStocks.length === 0">
+                                    <td colspan="9" class="py-16 text-center text-cyber-textMuted text-xs leading-loose">
                                         {{ screenerResult.message || '请勾选左侧策略并执行“多因子选股计算”' }}
                                     </td>
                                 </tr>
@@ -724,6 +788,8 @@
                 const screenerLoading = ref(false);
                 const screenerResult = ref({});
                 const reportGenerating = ref(false);
+                const sortKey = ref("");
+                const sortOrder = ref("desc");
                 const overviewLoading = ref(false);
 
                 // 2. 市场大势 state
@@ -793,6 +859,38 @@
                     });
                     return group;
                 });
+
+                // 排序相关计算属性与方法
+                const sortedStocks = computed(() => {
+                    const stocks = screenerResult.value?.stocks || [];
+                    if (!sortKey.value) return stocks;
+                    return [...stocks].sort((a, b) => {
+                        let valA = a[sortKey.value];
+                        let valB = b[sortKey.value];
+                        const numericColumns = ['close', 'vol_ratio', 'dev_ma20_pct', 'slope_ma20', 'slope_ma30'];
+                        if (numericColumns.includes(sortKey.value)) {
+                            valA = parseFloat(valA);
+                            valB = parseFloat(valB);
+                            if (isNaN(valA)) valA = 0;
+                            if (isNaN(valB)) valB = 0;
+                        } else {
+                            valA = String(valA || "").toLowerCase();
+                            valB = String(valB || "").toLowerCase();
+                        }
+                        if (valA < valB) return sortOrder.value === 'asc' ? -1 : 1;
+                        if (valA > valB) return sortOrder.value === 'asc' ? 1 : -1;
+                        return 0;
+                    });
+                });
+
+                const sortBy = (key) => {
+                    if (sortKey.value === key) {
+                        sortOrder.value = sortOrder.value === 'asc' ? 'desc' : 'asc';
+                    } else {
+                        sortKey.value = key;
+                        sortOrder.value = 'desc';
+                    }
+                };
 
                 // 初始化与重绘 30 日折线图
                 const initFlowChart = () => {
@@ -1017,6 +1115,8 @@
                         };
                         return;
                     }
+                    sortKey.value = "";
+                    sortOrder.value = "desc";
                     screenerLoading.value = true;
                     screenerResult.value = { stocks: [], message: "⚡ 正在调用全核 CPU 进行因子计算与交集过滤..." };
                     try {
@@ -1174,6 +1274,10 @@
                     saveStrategy,
                     runScreener,
                     generateScreenerReport,
+                    sortKey,
+                    sortOrder,
+                    sortBy,
+                    sortedStocks,
                     
                     // 大势 state 与 methods
                     marketData,

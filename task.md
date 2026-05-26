@@ -68,5 +68,12 @@
 - `[x]` SQL 逻辑更新：在 `strategies.json` 里的概念和行业宽度计算中追加 `string_agg` 聚合今日突破个股列表
 - `[x]` 后端与编译同步：在 `server.py` 和 `analyzer.py` 中解析突破个股代码、关联本地通达信字典，转换为结构化 `breakout_stocks` 数组
 - `[x]` 前端响应式状态：在 `web/index.html` 声明 reactive 变量 `expandedIndustries` 和 `expandedConcepts` 并暴露 toggle 方法
-- `[x]` HTML 树状穿透：利用 Vue 3 的 `<template v-for>`，在突破数量上挂载鼠标手势点击事件，下钻显示包含代码和名称的 4 列响应式霓虹网格
+- `[x]` HTML 树状穿透：利用 Vue 3 的 `<template v-for>`，在突破数量上挂载鼠标手势点击事件，下钻显示包含代码 and 名称的 4 列响应式霓虹网格
 - `[x]` 编译验证与缓存同步：重新编译并跑通 `python3 analyzer.py`，确认离线/在线模式点击下钻显示个股均完美生效
+
+## Phase 11: 多因子选股结果表格高能动态客户端排序 (已完成)
+- `[x]` 状态与方法注入：在 `web/index.html` 的 Vue setup 中声明 `sortKey` 和 `sortOrder` 响应式状态，并定义 `sortBy(key)` 切换机制。
+- `[x]` 复合数据类型解析：在 `sortedStocks` 计算属性中实现智能分类排序，针对浮点数指标（收盘价、放量、偏离度、双线斜率）自动调用 `parseFloat()` 进行精确算术排序，针对文本列自动调用字母拼音规则排序。
+- `[x]` 赛博霓虹交互表头：重构 HTML `<thead>` 表头为可点击悬浮高亮状态，注入霓虹青色 `▲` / `▼` 活动方向标志，并使用 `⇅` 灰度占位符表明所有因子均可交互。
+- `[x]` 模板循环重对齐：将 table body 渲染源从原始 `screenerResult.stocks` 无缝切换为 `sortedStocks` 计算属性，并将 `colspan` 从错位的 7 修正为 9，彻底解决离线时布局错位瑕疵。
+- `[x]` 零延迟计算编译：运行 `python3 analyzer.py` 成功重构全终端通用的 `market_dashboard.html`，实现离线/在线状态下均可双击进行毫秒级因子极速排序。
