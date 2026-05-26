@@ -362,13 +362,15 @@ def add_new_strategy(req: AddStrategyRequest):
         return JSONResponse(status_code=500, content={"status": "error", "message": f"保存失败: {e}"})
 
 @app.get("/api/market/data", summary="极速多线程计算并获取全市场情绪与大盘雷达 JSON 数据")
-def get_market_data():
+def get_market_data(refresh: bool = False):
     global _MARKET_CACHE
     
-    # 智能数据指纹指征，当 underlying 数据没有发生更新时，直接秒级返回缓存数据
+    # 智能数据指纹指征，当 underlying 数据没有发生更新且没有强制刷新时，直接秒级返回缓存数据
     current_sig = get_data_signature()
-    if _MARKET_CACHE["data"] is not None and _MARKET_CACHE["signature"] == current_sig:
-        return _MARKET_CACHE["data"]
+    if not refresh and _MARKET_CACHE["data"] is not None and _MARKET_CACHE["signature"] == current_sig:
+        cached_data = _MARKET_CACHE["data"].copy()
+        cached_data["is_cached"] = True
+        return cached_data
 
     t_start = time.perf_counter()
     tdx_dir = load_tdx_dir()
@@ -516,8 +518,11 @@ def get_market_data():
     industry_flow_processed = process_flow_data(df_ind_flow, 'industry_name')
     concept_flow_processed = process_flow_data(df_concept_flow, 'block_name')
 
+    calc_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     full_data = {
         "status": "success",
+        "is_cached": False,
+        "cache_time": calc_time,
         "trade_date": trade_date_str,
         "total_stocks": total_stocks,
         "median_return": median_return,
