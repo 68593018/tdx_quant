@@ -53,6 +53,72 @@ def execute_sql(con, sql: str):
         print(f"❌ SQL 执行失败: {e}")
         sys.exit(1)
 
+def process_flow_data(df, name_col) -> dict:
+    """处理板块资金流向 DataFrame，提取最新交易日 TOP 10 和 BOTTOM 10 的 30 日时序数据"""
+    if df.empty:
+        return {"dates": [], "top_10": [], "bottom_10": [], "series": []}
+    
+    # 格式化日期字符串
+    df['date_str'] = df['date'].apply(lambda x: x.strftime('%Y-%m-%d') if hasattr(x, 'strftime') else str(x)[:10])
+    dates = sorted(list(df['date_str'].unique()))
+    
+    if not dates:
+        return {"dates": [], "top_10": [], "bottom_10": [], "series": []}
+        
+    latest_date_str = dates[-1]
+    
+    # 筛选最新交易日，排序获取 TOP 10 和 BOTTOM 10
+    df_latest = df[df['date_str'] == latest_date_str].sort_values(by='sector_ratio', ascending=False)
+    top_10_names = df_latest.head(10)[name_col].tolist()
+    bottom_10_names = df_latest.tail(10)[name_col].tolist()
+    
+    # 构建数据字典加速时序组装
+    lookup = {}
+    for _, row in df.iterrows():
+        lookup[(row[name_col], row['date_str'])] = (
+            float(row['sector_amount']) / 1e8,  # 转换为亿元
+            float(row['sector_ratio'])
+        )
+        
+    series = []
+    
+    # TOP 10
+    for name in top_10_names:
+        amount_history = []
+        ratio_history = []
+        for d in dates:
+            val = lookup.get((name, d), (0.0, 0.0))
+            amount_history.append(round(val[0], 2))
+            ratio_history.append(round(val[1], 4))
+        series.append({
+            "name": name,
+            "type": "top",
+            "amount": amount_history,
+            "ratio": ratio_history
+        })
+        
+    # BOTTOM 10
+    for name in bottom_10_names:
+        amount_history = []
+        ratio_history = []
+        for d in dates:
+            val = lookup.get((name, d), (0.0, 0.0))
+            amount_history.append(round(val[0], 2))
+            ratio_history.append(round(val[1], 4))
+        series.append({
+            "name": name,
+            "type": "bottom",
+            "amount": amount_history,
+            "ratio": ratio_history
+        })
+        
+    return {
+        "dates": dates,
+        "top_10": top_10_names,
+        "bottom_10": bottom_10_names,
+        "series": series
+    }
+
 def load_tdx_dir() -> str:
     """从 config.json 配置文件中载入通达信安装路径，规避硬编码"""
     if os.path.exists(CONFIG_PATH):
@@ -186,7 +252,7 @@ def main():
     df_support = execute_sql(con, sql_support)
     t_sql4_end = time.perf_counter()
 
-    # --- 模块五：行业板块资金宽度与动能轮动 ---
+    # --- 模块五：行业板块均线多头占比与动能轮动 ---
     sql_ind_breadth = strategies["industry_breadth"]["query_sql"]\
         .replace("__DATA_STORE_DIR__", DATA_STORE_DIR)\
         .replace("__PATTERNS_STR__", patterns_str)\
@@ -195,6 +261,26 @@ def main():
     t_sql5 = time.perf_counter()
     df_ind_breadth = execute_sql(con, sql_ind_breadth)
     t_sql5_end = time.perf_counter()
+
+    # --- 模块六：行业板块30日资金时序流向 ---
+    sql_ind_flow = strategies["industry_flow_30d"]["query_sql"]\
+        .replace("__DATA_STORE_DIR__", DATA_STORE_DIR)\
+        .replace("__PATTERNS_STR__", patterns_str)\
+        .replace("__INDUSTRY_MAPPINGS_PATH__", INDUSTRY_MAPPINGS_PATH)
+        
+    t_sql6 = time.perf_counter()
+    df_ind_flow = execute_sql(con, sql_ind_flow)
+    t_sql6_end = time.perf_counter()
+
+    # --- 模块七：概念板块30日资金时序流向 ---
+    sql_concept_flow = strategies["concept_flow_30d"]["query_sql"]\
+        .replace("__DATA_STORE_DIR__", DATA_STORE_DIR)\
+        .replace("__PATTERNS_STR__", patterns_str)\
+        .replace("__BLOCK_MAPPINGS_PATH__", BLOCK_MAPPINGS_PATH)
+        
+    t_sql7 = time.perf_counter()
+    df_concept_flow = execute_sql(con, sql_concept_flow)
+    t_sql7_end = time.perf_counter()
 
     # 4. 解析整理数据
     # 提取全局基础变量
@@ -276,6 +362,10 @@ def main():
             "total_amount_billions": float(r['total_amount']) / 1e8  # 转换为亿元
         })
 
+    # 整理30日板块资金时序流向
+    industry_flow_processed = process_flow_data(df_ind_flow, 'industry_name')
+    concept_flow_processed = process_flow_data(df_concept_flow, 'block_name')
+
     # 整理全套数据字典用于前端注入
     full_data = {
         "trade_date": trade_date_str,
@@ -289,7 +379,9 @@ def main():
         "streaks": streaks_list,
         "breadth": breadth_list,
         "industry_breadth": ind_breadth_list,
-        "support": support_list
+        "support": support_list,
+        "industry_flow": industry_flow_processed,
+        "concept_flow": concept_flow_processed
     }
 
     t_calc = time.perf_counter()
@@ -298,7 +390,9 @@ def main():
     print(f"   ├─ 高度连板梯队计算 SQL 耗时: {t_sql2_end - t_sql2:.4f} 秒")
     print(f"   ├─ 概念板块资金宽度计算 SQL 耗时: {t_sql3_end - t_sql3:.4f} 秒")
     print(f"   ├─ 行业板块资金宽度计算 SQL 耗时: {t_sql5_end - t_sql5:.4f} 秒")
-    print(f"   └─ 指数支撑筹码分布 SQL 耗时: {t_sql4_end - t_sql4:.4f} 秒")
+    print(f"   ├─ 指数支撑筹码分布 SQL 耗时: {t_sql4_end - t_sql4:.4f} 秒")
+    print(f"   ├─ 行业板块30日资金流向 SQL 耗时: {t_sql6_end - t_sql6:.4f} 秒")
+    print(f"   └─ 概念板块30日资金流向 SQL 耗时: {t_sql7_end - t_sql7:.4f} 秒")
 
     # =========================================================================
     # 输出通道一：高颜值控制台战报与 Markdown 报告生成
@@ -674,6 +768,37 @@ def generate_html_dashboard(data):
             background: linear-gradient(to right, var(--primary), var(--secondary));
             border-radius: 10px;
         }
+
+        /* 30日时序板块资金流向 Tab样式 */
+        .chart-header-tabs {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            padding-bottom: 0.75rem;
+            margin-bottom: 1.5rem;
+        }
+        @media (max-width: 768px) {
+            .chart-header-tabs {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 1rem;
+            }
+        }
+        .tab-btn, .metric-btn {
+            font-family: 'Inter', -apple-system, sans-serif;
+            font-size: 0.8rem;
+            padding: 0.4rem 1rem;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            outline: none;
+        }
+        .tab-btn:hover, .metric-btn:hover {
+            opacity: 0.9;
+            transform: translateY(-1px);
+        }
     </style>
 </head>
 <body>
@@ -789,6 +914,26 @@ def generate_html_dashboard(data):
                 <p style="margin-bottom: 1rem;"><strong style="color: var(--secondary);">2. 寻找绝对主线：</strong>关注完美多头占比超过 40% 的行业板块。此类板块通常有持续不断的机构或主力资金流入，是中期持股的首选方向。</p>
                 <p><strong style="color: var(--accent);">3. 狙击短线先锋：</strong>在多头占比高的概念或行业中，寻找今日放量突破 MA20 的个股。这往往是板块启动或加速时的最强信号股，结合连板梯队高度可以精准捕捉游资炒作的核心龙头。</p>
             </div>
+        </div>
+    </div>
+
+    <div class="grid-dashboard" style="grid-template-columns: 1fr; margin-bottom: 2.5rem;">
+        <!-- 🧱 30日板块资金时序折线图 -->
+        <div class="card-chart">
+            <div class="chart-header-tabs">
+                <div class="chart-title" style="border-bottom: none; margin-bottom: 0; padding-bottom: 0;">🌊 最近30个交易日板块资金流向时序图与领涨领跌曲线</div>
+                <div style="display: flex; gap: 1rem; flex-wrap: wrap;">
+                    <div class="tabs-btn-group" style="display: flex; gap: 0.5rem;">
+                        <button class="tab-btn" onclick="switchFlowType('industry')" id="btn-flow-industry" style="background: rgba(6, 182, 212, 0.15); border: 1px solid var(--primary); color: var(--primary);">行业板块</button>
+                        <button class="tab-btn" onclick="switchFlowType('concept')" id="btn-flow-concept" style="background: rgba(255, 255, 255, 0.03); border: 1px solid var(--border-subtle); color: var(--text-muted);">概念板块</button>
+                    </div>
+                    <div class="tabs-metric-group" style="display: flex; gap: 0.5rem;">
+                        <button class="metric-btn" onclick="switchFlowMetric('ratio')" id="btn-metric-ratio" style="background: rgba(6, 182, 212, 0.15); border: 1px solid var(--primary); color: var(--primary);">相对资金占比 (%)</button>
+                        <button class="metric-btn" onclick="switchFlowMetric('amount')" id="btn-metric-amount" style="background: rgba(255, 255, 255, 0.03); border: 1px solid var(--border-subtle); color: var(--text-muted);">绝对交易金额 (亿元)</button>
+                    </div>
+                </div>
+            </div>
+            <div class="chart-box" id="chart-flow-trend" style="height: 480px; width: 100%;"></div>
         </div>
     </div>
 
@@ -950,10 +1095,133 @@ def generate_html_dashboard(data):
             });
         }
 
-        // 6. 响应式布局自适应
+        // 6. 30日时序板块资金流向折线图渲染逻辑
+        const chartFlow = echarts.init(document.getElementById("chart-flow-trend"));
+        let currentFlowType = "industry"; // "industry" or "concept"
+        let currentFlowMetric = "ratio";  // "ratio" or "amount"
+
+        function switchFlowType(type) {
+            currentFlowType = type;
+            updateTabButtonStyle("btn-flow-industry", type === "industry");
+            updateTabButtonStyle("btn-flow-concept", type === "concept");
+            renderFlowChart();
+        }
+
+        function switchFlowMetric(metric) {
+            currentFlowMetric = metric;
+            updateTabButtonStyle("btn-metric-ratio", metric === "ratio");
+            updateTabButtonStyle("btn-metric-amount", metric === "amount");
+            renderFlowChart();
+        }
+
+        function updateTabButtonStyle(id, isActive) {
+            const btn = document.getElementById(id);
+            if (isActive) {
+                btn.style.background = "rgba(6, 182, 212, 0.15)";
+                btn.style.borderColor = "var(--primary)";
+                btn.style.color = "var(--primary)";
+            } else {
+                btn.style.background = "rgba(255, 255, 255, 0.03)";
+                btn.style.borderColor = "var(--border-subtle)";
+                btn.style.color = "var(--text-muted)";
+            }
+        }
+
+        function renderFlowChart() {
+            const flowData = currentFlowType === "industry" ? MARKET_DATA.industry_flow : MARKET_DATA.concept_flow;
+            if (!flowData || !flowData.dates || flowData.dates.length === 0) {
+                return;
+            }
+            const dates = flowData.dates;
+            const metric = currentFlowMetric;
+            
+            const seriesList = [];
+            const selectedLegend = {};
+            
+            flowData.series.forEach(item => {
+                const isTop = item.type === "top";
+                // Show top 10 by default, hide bottom 10 initially to keep chart clean but allow toggling
+                selectedLegend[item.name] = isTop;
+                
+                seriesList.push({
+                    name: item.name,
+                    type: "line",
+                    data: metric === "ratio" ? item.ratio : item.amount,
+                    smooth: true,
+                    showSymbol: false,
+                    lineStyle: {
+                        width: isTop ? 2.5 : 1.5,
+                        type: isTop ? "solid" : "dashed"
+                    },
+                    emphasis: {
+                        focus: "series",
+                        lineStyle: {
+                            width: 4
+                        }
+                    }
+                });
+            });
+
+            const option = {
+                backgroundColor: 'transparent',
+                tooltip: {
+                    trigger: 'axis',
+                    axisPointer: { type: 'cross', label: { backgroundColor: '#1f2937' } },
+                    backgroundColor: 'rgba(13, 20, 35, 0.9)',
+                    borderColor: 'rgba(255, 255, 255, 0.1)',
+                    textStyle: { color: '#f3f4f6' }
+                },
+                legend: {
+                    data: flowData.series.map(item => item.name),
+                    selected: selectedLegend,
+                    textStyle: { color: '#9ca3af', fontSize: 10 },
+                    type: 'scroll',
+                    bottom: 0,
+                    padding: [15, 0, 0, 0]
+                },
+                grid: {
+                    left: '3%',
+                    right: '4%',
+                    bottom: '15%',
+                    top: '8%',
+                    containLabel: true
+                },
+                xAxis: {
+                    type: 'category',
+                    boundaryGap: false,
+                    data: dates,
+                    axisLabel: { color: '#9ca3af', fontSize: 10 },
+                    axisLine: { lineStyle: { color: 'rgba(255, 255, 255, 0.08)' } }
+                },
+                yAxis: {
+                    type: 'value',
+                    name: metric === "ratio" ? "资金占比 (%)" : "交易金额 (亿元)",
+                    nameTextStyle: { color: '#9ca3af', fontSize: 10 },
+                    axisLabel: { color: '#9ca3af', formatter: metric === "ratio" ? '{value}%' : '{value} 亿' },
+                    splitLine: { lineStyle: { color: 'rgba(255, 255, 255, 0.03)' } }
+                },
+                color: [
+                    // Top 10 (Warm & Bright)
+                    '#ef4444', '#f97316', '#f59e0b', '#10b981', '#06b6d4', 
+                    '#3b82f6', '#6366f1', '#8b5cf6', '#d946ef', '#ec4899',
+                    // Bottom 10 (Cool & Muted / Greyscale / Dotted lines)
+                    '#64748b', '#475569', '#334155', '#94a3b8', '#cbd5e1',
+                    '#86efac', '#67e8f9', '#a5b4fc', '#c084fc', '#f472b6'
+                ],
+                series: seriesList
+            };
+
+            chartFlow.setOption(option, true);
+        }
+
+        // Initialize flow chart rendering
+        renderFlowChart();
+
+        // 7. 响应式布局自适应
         window.addEventListener('resize', () => {
             chartDist.resize();
             chartSupport.resize();
+            chartFlow.resize();
         });
     </script>
 </body>
