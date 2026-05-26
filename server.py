@@ -617,6 +617,10 @@ def run_screener(req: ScreenerRequest):
                 .replace("__INDUSTRY_MAPPINGS_PATH__", INDUSTRY_MAPPINGS_PATH)\
                 .replace("__CATEGORY_FILTER__", category_filter)
             
+            # 自动剔除今日未交易/停牌股票 (date为大盘最新交易日且volume > 0)
+            sql = sql.replace("row_num = 1", f"row_num = 1 AND date = (SELECT MAX(date) FROM read_parquet('{DATA_STORE_DIR}/sh600000.parquet')) AND volume > 0")
+            sql = sql.replace("rn = 1", f"rn = 1 AND date = (SELECT MAX(date) FROM read_parquet('{DATA_STORE_DIR}/sh600000.parquet')) AND volume > 0")
+
             df = con.execute(sql).fetchdf()
             dfs.append(df)
     except Exception as e:
@@ -716,6 +720,10 @@ def save_screener_report(req: ScreenerRequest):
                 .replace("__INDUSTRY_MAPPINGS_PATH__", INDUSTRY_MAPPINGS_PATH)\
                 .replace("__CATEGORY_FILTER__", category_filter)
             
+            # 自动剔除今日未交易/停牌股票 (date为大盘最新交易日且volume > 0)
+            sql = sql.replace("row_num = 1", f"row_num = 1 AND date = (SELECT MAX(date) FROM read_parquet('{DATA_STORE_DIR}/sh600000.parquet')) AND volume > 0")
+            sql = sql.replace("rn = 1", f"rn = 1 AND date = (SELECT MAX(date) FROM read_parquet('{DATA_STORE_DIR}/sh600000.parquet')) AND volume > 0")
+
             df = con.execute(sql).fetchdf()
             dfs.append(df)
     except Exception as e:
