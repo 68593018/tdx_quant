@@ -46,7 +46,21 @@ except ImportError:
         print(f"❌ 自动安装 DuckDB 失败，请手动安装。错误: {e}")
         sys.exit(1)
 
+try:
+    import pandas as pd
+except ImportError:
+    print("⏳ 检测到当前环境未安装 Pandas 依赖，正在为您自动静默安装...")
+    try:
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "pandas"],
+                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        import pandas as pd
+        print("✅ Pandas 依赖自动安装成功！\n")
+    except Exception as e:
+        print(f"❌ 自动安装 Pandas 失败，请手动安装。错误: {e}")
+        sys.exit(1)
+
 # -------------------------------------------------------------
+
 # 2. 路径配置与全局变量
 # -------------------------------------------------------------
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -484,6 +498,14 @@ def get_market_data(refresh: bool = False):
 
     breadth_list = []
     for _, r in df_breadth.iterrows():
+        breakout_stocks = []
+        if 'breakout_symbols' in r and pd.notnull(r['breakout_symbols']) and r['breakout_symbols']:
+            symbols = [s.strip() for s in r['breakout_symbols'].split(',') if s.strip()]
+            for s in symbols:
+                sym_upper = s.upper()
+                cname = names_map.get(s.lower(), "")
+                breakout_stocks.append({"symbol": sym_upper, "name": cname})
+                
         breadth_list.append({
             "block_name": r['block_name'],
             "total_stocks": int(r['total_stocks']),
@@ -491,11 +513,20 @@ def get_market_data(refresh: bool = False):
             "above_ma20_ratio": float(r['above_ma20_ratio']),
             "bullish_count": int(r['bullish_count']),
             "bullish_ratio": float(r['bullish_ratio']),
-            "breakout_count": int(r['breakout_count'])
+            "breakout_count": int(r['breakout_count']),
+            "breakout_stocks": breakout_stocks
         })
 
     ind_breadth_list = []
     for _, r in df_ind_breadth.iterrows():
+        breakout_stocks = []
+        if 'breakout_symbols' in r and pd.notnull(r['breakout_symbols']) and r['breakout_symbols']:
+            symbols = [s.strip() for s in r['breakout_symbols'].split(',') if s.strip()]
+            for s in symbols:
+                sym_upper = s.upper()
+                cname = names_map.get(s.lower(), "")
+                breakout_stocks.append({"symbol": sym_upper, "name": cname})
+                
         ind_breadth_list.append({
             "industry_name": r['industry_name'],
             "total_stocks": int(r['total_stocks']),
@@ -503,7 +534,8 @@ def get_market_data(refresh: bool = False):
             "above_ma20_ratio": float(r['above_ma20_ratio']),
             "bullish_count": int(r['bullish_count']),
             "bullish_ratio": float(r['bullish_ratio']),
-            "breakout_count": int(r['breakout_count'])
+            "breakout_count": int(r['breakout_count']),
+            "breakout_stocks": breakout_stocks
         })
 
     support_list = []

@@ -414,17 +414,35 @@
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    <tr v-for="b in marketData.industry_breadth?.slice(0, 10)" :key="b.industry_name" class="border-b border-white/2 hover:bg-white/1">
-                                        <td class="py-2.5 font-bold">{{ b.industry_name }}</td>
-                                        <td class="py-2.5 text-cyber-textMuted">{{ b.total_stocks }} 只</td>
-                                        <td class="py-2.5 flex items-center gap-2">
-                                            <div class="w-16 h-1.5 bg-white/5 rounded-full overflow-hidden">
-                                                <div class="h-full bg-gradient-to-r from-cyber-primary to-cyber-secondary rounded-full" :style="{ width: b.bullish_ratio + '%' }"></div>
-                                            </div>
-                                            <strong>{{ b.bullish_ratio.toFixed(1) }}%</strong>
-                                        </td>
-                                        <td class="py-2.5 text-right text-cyber-primary font-bold">{{ b.breakout_count }} 只</td>
-                                    </tr>
+                                    <template v-for="b in marketData.industry_breadth?.slice(0, 10)" :key="b.industry_name">
+                                        <tr class="border-b border-white/2 hover:bg-white/1">
+                                            <td class="py-2.5 font-bold">{{ b.industry_name }}</td>
+                                            <td class="py-2.5 text-cyber-textMuted">{{ b.total_stocks }} 只</td>
+                                            <td class="py-2.5 flex items-center gap-2">
+                                                <div class="w-16 h-1.5 bg-white/5 rounded-full overflow-hidden">
+                                                    <div class="h-full bg-gradient-to-r from-cyber-primary to-cyber-secondary rounded-full" :style="{ width: b.bullish_ratio + '%' }"></div>
+                                                </div>
+                                                <strong>{{ b.bullish_ratio.toFixed(1) }}%</strong>
+                                            </td>
+                                            <td class="py-2.5 text-right">
+                                                <span v-if="b.breakout_count > 0" @click="toggleIndustry(b.industry_name)" class="text-cyber-primary hover:underline cursor-pointer inline-flex items-center gap-1 select-none font-bold">
+                                                    {{ b.breakout_count }} 只 <span class="text-[9px] transition-transform duration-200" :style="{ transform: expandedIndustries[b.industry_name] ? 'rotate(180deg)' : 'rotate(0deg)' }">▼</span>
+                                                </span>
+                                                <span v-else class="text-cyber-textMuted font-bold">{{ b.breakout_count }} 只</span>
+                                            </td>
+                                        </tr>
+                                        <!-- 下拉个股面板 -->
+                                        <tr v-if="expandedIndustries[b.industry_name] && b.breakout_stocks?.length > 0">
+                                            <td colspan="4" class="bg-cyber-card/20 p-4 rounded-xl border border-cyber-border/30">
+                                                <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[10px] text-cyber-textMuted font-mono">
+                                                    <div v-for="s in b.breakout_stocks" :key="s.symbol" class="bg-white/5 px-2.5 py-1.5 rounded flex justify-between hover:bg-cyber-primary/15 hover:text-white transition-all duration-200 border border-white/2">
+                                                        <span class="text-white font-bold">{{ s.symbol }}</span>
+                                                        <span class="text-cyber-primary">{{ s.name }}</span>
+                                                    </div>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    </template>
                                 </tbody>
                             </table>
                         </div>
@@ -445,17 +463,35 @@
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    <tr v-for="b in marketData.breadth?.slice(0, 10)" :key="b.block_name" class="border-b border-white/2 hover:bg-white/1">
-                                        <td class="py-2.5 font-bold">{{ b.block_name }}</td>
-                                        <td class="py-2.5 text-cyber-textMuted">{{ b.total_stocks }} 只</td>
-                                        <td class="py-2.5 flex items-center gap-2">
-                                            <div class="w-16 h-1.5 bg-white/5 rounded-full overflow-hidden">
-                                                <div class="h-full bg-gradient-to-r from-cyber-primary to-cyber-secondary rounded-full" :style="{ width: b.bullish_ratio + '%' }"></div>
-                                            </div>
-                                            <strong>{{ b.bullish_ratio.toFixed(1) }}%</strong>
-                                        </td>
-                                        <td class="py-2.5 text-right text-cyber-primary font-bold">{{ b.breakout_count }} 只</td>
-                                    </tr>
+                                    <template v-for="b in marketData.breadth?.slice(0, 10)" :key="b.block_name">
+                                        <tr class="border-b border-white/2 hover:bg-white/1">
+                                            <td class="py-2.5 font-bold">{{ b.block_name }}</td>
+                                            <td class="py-2.5 text-cyber-textMuted">{{ b.total_stocks }} 只</td>
+                                            <td class="py-2.5 flex items-center gap-2">
+                                                <div class="w-16 h-1.5 bg-white/5 rounded-full overflow-hidden">
+                                                    <div class="h-full bg-gradient-to-r from-cyber-primary to-cyber-secondary rounded-full" :style="{ width: b.bullish_ratio + '%' }"></div>
+                                                </div>
+                                                <strong>{{ b.bullish_ratio.toFixed(1) }}%</strong>
+                                            </td>
+                                            <td class="py-2.5 text-right">
+                                                <span v-if="b.breakout_count > 0" @click="toggleConcept(b.block_name)" class="text-cyber-primary hover:underline cursor-pointer inline-flex items-center gap-1 select-none font-bold">
+                                                    {{ b.breakout_count }} 只 <span class="text-[9px] transition-transform duration-200" :style="{ transform: expandedConcepts[b.block_name] ? 'rotate(180deg)' : 'rotate(0deg)' }">▼</span>
+                                                </span>
+                                                <span v-else class="text-cyber-textMuted font-bold">{{ b.breakout_count }} 只</span>
+                                            </td>
+                                        </tr>
+                                        <!-- 下拉个股面板 -->
+                                        <tr v-if="expandedConcepts[b.block_name] && b.breakout_stocks?.length > 0">
+                                            <td colspan="4" class="bg-cyber-card/20 p-4 rounded-xl border border-cyber-border/30">
+                                                <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[10px] text-cyber-textMuted font-mono">
+                                                    <div v-for="s in b.breakout_stocks" :key="s.symbol" class="bg-white/5 px-2.5 py-1.5 rounded flex justify-between hover:bg-cyber-primary/15 hover:text-white transition-all duration-200 border border-white/2">
+                                                        <span class="text-white font-bold">{{ s.symbol }}</span>
+                                                        <span class="text-cyber-primary">{{ s.name }}</span>
+                                                    </div>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    </template>
                                 </tbody>
                             </table>
                         </div>
@@ -670,6 +706,14 @@
                 const marketData = ref({});
                 const currentFlowType = ref("industry");
                 const currentFlowMetric = ref("ratio");
+                const expandedIndustries = ref({});
+                const expandedConcepts = ref({});
+                const toggleIndustry = (name) => {
+                    expandedIndustries.value[name] = !expandedIndustries.value[name];
+                };
+                const toggleConcept = (name) => {
+                    expandedConcepts.value[name] = !expandedConcepts.value[name];
+                };
                 let chartFlowInstance = null;
 
                 // 3. 数据中心 state
@@ -1079,6 +1123,10 @@
                     currentFlowMetric,
                     switchFlowType,
                     switchFlowMetric,
+                    expandedIndustries,
+                    expandedConcepts,
+                    toggleIndustry,
+                    toggleConcept,
 
                     // 同步与查询
                     syncStatus,

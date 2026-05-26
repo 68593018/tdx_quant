@@ -4,6 +4,7 @@ import json
 import time
 import subprocess
 from datetime import datetime
+import pandas as pd
 
 # -------------------------------------------------------------
 # 1. 动态检测并自动静默安装 DuckDB 库 (极致顺滑的免运维体验)
@@ -336,6 +337,14 @@ def main():
     # 整理板块宽度列表
     breadth_list = []
     for _, r in df_breadth.iterrows():
+        breakout_stocks = []
+        if 'breakout_symbols' in r and pd.notnull(r['breakout_symbols']) and r['breakout_symbols']:
+            symbols = [s.strip() for s in r['breakout_symbols'].split(',') if s.strip()]
+            for s in symbols:
+                sym_upper = s.upper()
+                cname = names_map.get(s.lower(), "")
+                breakout_stocks.append({"symbol": sym_upper, "name": cname})
+                
         breadth_list.append({
             "block_name": r['block_name'],
             "total_stocks": int(r['total_stocks']),
@@ -343,12 +352,21 @@ def main():
             "above_ma20_ratio": float(r['above_ma20_ratio']),
             "bullish_count": int(r['bullish_count']),
             "bullish_ratio": float(r['bullish_ratio']),
-            "breakout_count": int(r['breakout_count'])
+            "breakout_count": int(r['breakout_count']),
+            "breakout_stocks": breakout_stocks
         })
 
     # 整理行业板块宽度列表
     ind_breadth_list = []
     for _, r in df_ind_breadth.iterrows():
+        breakout_stocks = []
+        if 'breakout_symbols' in r and pd.notnull(r['breakout_symbols']) and r['breakout_symbols']:
+            symbols = [s.strip() for s in r['breakout_symbols'].split(',') if s.strip()]
+            for s in symbols:
+                sym_upper = s.upper()
+                cname = names_map.get(s.lower(), "")
+                breakout_stocks.append({"symbol": sym_upper, "name": cname})
+                
         ind_breadth_list.append({
             "industry_name": r['industry_name'],
             "total_stocks": int(r['total_stocks']),
@@ -356,7 +374,8 @@ def main():
             "above_ma20_ratio": float(r['above_ma20_ratio']),
             "bullish_count": int(r['bullish_count']),
             "bullish_ratio": float(r['bullish_ratio']),
-            "breakout_count": int(r['breakout_count'])
+            "breakout_count": int(r['breakout_count']),
+            "breakout_stocks": breakout_stocks
         })
 
     # 整理大盘支撑列表

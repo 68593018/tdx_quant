@@ -63,3 +63,10 @@
 - `[x]` 在前端 `web/index.html` 添加高颜值“🎯 选股标的范围”复选框组件并传入 POST 请求
 - `[x]` 运行 `python3 analyzer.py` 编译静态看板大屏文件并验证
 - `[x]` 测试 5 类标的（股票、指数、板块、基金、债券）的单独和多选合并筛选功能，确认功能稳定
+
+## Phase 10: 大势分析个股下钻穿透与点击展开交互 (已完成)
+- `[x]` SQL 逻辑更新：在 `strategies.json` 里的概念和行业宽度计算中追加 `string_agg` 聚合今日突破个股列表
+- `[x]` 后端与编译同步：在 `server.py` 和 `analyzer.py` 中解析突破个股代码、关联本地通达信字典，转换为结构化 `breakout_stocks` 数组
+- `[x]` 前端响应式状态：在 `web/index.html` 声明 reactive 变量 `expandedIndustries` 和 `expandedConcepts` 并暴露 toggle 方法
+- `[x]` HTML 树状穿透：利用 Vue 3 的 `<template v-for>`，在突破数量上挂载鼠标手势点击事件，下钻显示包含代码和名称的 4 列响应式霓虹网格
+- `[x]` 编译验证与缓存同步：重新编译并跑通 `python3 analyzer.py`，确认离线/在线模式点击下钻显示个股均完美生效
