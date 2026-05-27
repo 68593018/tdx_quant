@@ -105,8 +105,14 @@
                 <button @click="switchTab('screener')" :class="['px-5 py-2 rounded-lg text-xs font-semibold tracking-wider flex items-center gap-2 transition-all', activeTab === 'screener' ? 'bg-cyber-primary/10 border border-cyber-primary/20 text-cyber-primary' : 'text-cyber-textMuted hover:text-white']">
                     🚀 多因子选股
                 </button>
+                <button @click="switchTab('backtest')" :class="['px-5 py-2 rounded-lg text-xs font-semibold tracking-wider flex items-center gap-2 transition-all', activeTab === 'backtest' ? 'bg-cyber-primary/10 border border-cyber-primary/20 text-cyber-primary' : 'text-cyber-textMuted hover:text-white']">
+                    ⏱️ 组合回测
+                </button>
                 <button @click="switchTab('analysis')" :class="['px-5 py-2 rounded-lg text-xs font-semibold tracking-wider flex items-center gap-2 transition-all', activeTab === 'analysis' ? 'bg-cyber-primary/10 border border-cyber-primary/20 text-cyber-primary' : 'text-cyber-textMuted hover:text-white']">
                     🌊 大势分析
+                </button>
+                <button @click="switchTab('stock_analysis')" :class="['px-5 py-2 rounded-lg text-xs font-semibold tracking-wider flex items-center gap-2 transition-all', activeTab === 'stock_analysis' ? 'bg-cyber-primary/10 border border-cyber-primary/20 text-cyber-primary' : 'text-cyber-textMuted hover:text-white']">
+                    🔍 个股分析
                 </button>
                 <button @click="switchTab('data_center')" :class="['px-5 py-2 rounded-lg text-xs font-semibold tracking-wider flex items-center gap-2 transition-all', activeTab === 'data_center' ? 'bg-cyber-primary/10 border border-cyber-primary/20 text-cyber-primary' : 'text-cyber-textMuted hover:text-white']">
                     💾 数据中心
@@ -244,7 +250,18 @@
                         </div>
                     </div>
                 </div>
+
+                <!-- 📈 新增：主要指数及全市场（A股）30日成交额时序曲线图 -->
+                <div class="glass-card rounded-2xl p-6">
+                    <div class="flex justify-between items-center flex-wrap gap-4 border-b border-white/5 pb-4 mb-4">
+                        <div class="chart-title text-sm font-semibold flex items-center gap-2" style="border:none; margin:0; padding:0;">
+                            <span>📈</span> 主要指数及全市场（A股）最近30个交易日成交额时序曲线图
+                        </div>
+                    </div>
+                    <div class="w-full h-[400px]" id="chart-turnover-trend"></div>
+                </div>
             </div>
+
 
             <div v-show="activeTab === 'screener'" class="grid grid-cols-1 lg:grid-cols-4 gap-8">
                 <!-- 左边策略栏 -->
@@ -462,6 +479,242 @@
                 </div>
             </div>
 
+            <!-- ======================= ⏱️ TAB 2.5: 组合回测 ======================= -->
+            <div v-show="activeTab === 'backtest'" class="space-y-8">
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                    <!-- Left: Parameters Form Card -->
+                    <div class="glass-card rounded-2xl p-6 space-y-6">
+                        <div class="flex items-center gap-3 border-b border-white/5 pb-4">
+                            <span class="text-xl">⏱️</span>
+                            <div>
+                                <h3 class="text-sm font-semibold text-white">组合回测控制台</h3>
+                                <p class="text-[10px] text-cyber-textMuted font-mono">BACKTEST PARAMETERS</p>
+                            </div>
+                        </div>
+
+                        <div class="space-y-4 text-xs">
+                            <!-- Strategy Selection -->
+                            <div class="space-y-1.5">
+                                <label class="text-cyber-textMuted font-medium block">选股策略</label>
+                                <select v-model="backtestParams.strategy_id" class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-cyber-primary/50 text-xs">
+                                    <option v-for="s in stockStrategies" :key="s.id" :value="s.id" class="bg-cyber-dark text-white text-xs">
+                                        {{ s.name }}
+                                    </option>
+                                </select>
+                            </div>
+
+                            <!-- Start and End Dates -->
+                            <div class="grid grid-cols-2 gap-4">
+                                <div class="space-y-1.5">
+                                    <label class="text-cyber-textMuted font-medium block">开始日期</label>
+                                    <input type="date" v-model="backtestParams.start_date" class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-cyber-primary/50 text-xs">
+                                </div>
+                                <div class="space-y-1.5">
+                                    <label class="text-cyber-textMuted font-medium block">结束日期</label>
+                                    <input type="date" v-model="backtestParams.end_date" class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-cyber-primary/50 text-xs">
+                                </div>
+                            </div>
+
+                            <!-- Initial Capital and Rebalance Period -->
+                            <div class="grid grid-cols-2 gap-4">
+                                <div class="space-y-1.5">
+                                    <label class="text-cyber-textMuted font-medium block">初始资金 (元)</label>
+                                    <input type="number" v-model="backtestParams.initial_cash" class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-cyber-primary/50 text-xs">
+                                </div>
+                                <div class="space-y-1.5">
+                                    <label class="text-cyber-textMuted font-medium block">调仓周期</label>
+                                    <select v-model="backtestParams.rebalance_period" class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-cyber-primary/50 text-xs">
+                                        <option value="weekly" class="bg-cyber-dark text-white text-xs">每周一次 (星期一)</option>
+                                        <option value="daily" class="bg-cyber-dark text-white text-xs">每日一次</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <!-- Max stocks and holding days -->
+                            <div class="grid grid-cols-2 gap-4">
+                                <div class="space-y-1.5">
+                                    <label class="text-cyber-textMuted font-medium block">最大持仓股数</label>
+                                    <input type="number" v-model="backtestParams.max_stocks" class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-cyber-primary/50 text-xs">
+                                </div>
+                                <div class="space-y-1.5">
+                                    <label class="text-cyber-textMuted font-medium block">最长持有天数</label>
+                                    <input type="number" v-model="backtestParams.holding_days" class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-cyber-primary/50 text-xs">
+                                </div>
+                            </div>
+
+                            <div class="border-t border-white/5 pt-4 space-y-4">
+                                <h4 class="text-xs font-semibold text-cyber-primary">风控设置</h4>
+                                <div class="grid grid-cols-2 gap-4">
+                                    <div class="space-y-1.5">
+                                        <label class="text-cyber-textMuted font-medium block">硬止损比例 (%)</label>
+                                        <input type="number" step="0.5" v-model="backtestParams.stop_loss_pct" class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-cyber-primary/50 text-xs">
+                                    </div>
+                                    <div class="space-y-1.5">
+                                        <label class="text-cyber-textMuted font-medium block">追踪止盈比例 (%)</label>
+                                        <input type="number" step="0.5" v-model="backtestParams.trailing_stop_pct" class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-cyber-primary/50 text-xs">
+                                    </div>
+                                </div>
+                                <div class="flex items-center justify-between bg-white/5 rounded-xl p-3 border border-white/5">
+                                    <div class="space-y-0.5">
+                                        <span class="text-xs font-semibold text-white">MA20均线破位离场</span>
+                                        <p class="text-[10px] text-cyber-textMuted">收盘价跌破生命线立即止损</p>
+                                    </div>
+                                    <input type="checkbox" v-model="backtestParams.ma_breakout_exit" class="w-4 h-4 accent-cyber-primary">
+                                </div>
+                            </div>
+
+                            <div class="border-t border-white/5 pt-4 space-y-4">
+                                <h4 class="text-xs font-semibold text-cyber-primary">费率滑点与基准</h4>
+                                <div class="grid grid-cols-3 gap-2">
+                                    <div class="space-y-1.5">
+                                        <label class="text-cyber-textMuted font-medium block">佣金比例(%)</label>
+                                        <input type="number" step="0.01" v-model="backtestParams.commission_pct" class="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-cyber-primary/50 text-xs">
+                                    </div>
+                                    <div class="space-y-1.5">
+                                        <label class="text-cyber-textMuted font-medium block">印花税(%)</label>
+                                        <input type="number" step="0.01" v-model="backtestParams.stamp_duty_pct" class="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-cyber-primary/50 text-xs">
+                                    </div>
+                                    <div class="space-y-1.5">
+                                        <label class="text-cyber-textMuted font-medium block">滑点比例(%)</label>
+                                        <input type="number" step="0.01" v-model="backtestParams.slippage_pct" class="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-cyber-primary/50 text-xs">
+                                    </div>
+                                </div>
+                                <div class="space-y-1.5">
+                                    <label class="text-cyber-textMuted font-medium block">业绩比较基准</label>
+                                    <select v-model="backtestParams.benchmark_id" class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-cyber-primary/50 text-xs">
+                                        <option value="sh000300" class="bg-cyber-dark text-white text-xs">沪深 300 指数 (CSI 300)</option>
+                                        <option value="sh000001" class="bg-cyber-dark text-white text-xs">上证指数 (SSE Index)</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Run Button -->
+                        <button @click="runBacktest" :disabled="backtestLoading" class="w-full py-3 bg-gradient-to-r from-cyan-500 to-indigo-500 text-white rounded-xl font-bold tracking-widest hover:opacity-90 disabled:opacity-50 transition-all flex items-center justify-center gap-2 text-xs shadow-lg shadow-cyan-500/25">
+                            <span v-if="backtestLoading" class="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                            <span>{{ backtestLoading ? '组合回测深度计算中...' : '📊 启动极速系统调仓回测' }}</span>
+                        </button>
+
+                        <!-- Error Banner -->
+                        <div v-if="backtestError" class="bg-red-500/10 border border-red-500/20 text-red-400 rounded-xl p-4 text-xs font-mono text-center flex items-center justify-center gap-2">
+                            <span>⚠️</span> {{ backtestError }}
+                        </div>
+                    </div>
+
+                    <!-- Right: KPI Cards and ECharts -->
+                    <div class="lg:col-span-2 space-y-8">
+                        <!-- KPI Metric Cards -->
+                        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-4">
+                            <div class="glass-card rounded-xl p-4 flex flex-col items-center justify-center text-center">
+                                <span class="text-[10px] text-cyber-textMuted font-mono uppercase tracking-wider">累计收益率</span>
+                                <span :class="['text-sm font-bold mt-1 tracking-tight', backtestResult ? (backtestResult.metrics.total_return >= 0 ? 'text-emerald-400' : 'text-rose-400') : 'text-white']">
+                                    {{ backtestResult ? (backtestResult.metrics.total_return >= 0 ? '+' : '') + backtestResult.metrics.total_return + '%' : '--' }}
+                                </span>
+                            </div>
+                            <div class="glass-card rounded-xl p-4 flex flex-col items-center justify-center text-center">
+                                <span class="text-[10px] text-cyber-textMuted font-mono uppercase tracking-wider">年化收益率</span>
+                                <span :class="['text-sm font-bold mt-1 tracking-tight', backtestResult ? (backtestResult.metrics.annualized_return >= 0 ? 'text-emerald-400' : 'text-rose-400') : 'text-white']">
+                                    {{ backtestResult ? (backtestResult.metrics.annualized_return >= 0 ? '+' : '') + backtestResult.metrics.annualized_return + '%' : '--' }}
+                                </span>
+                            </div>
+                            <div class="glass-card rounded-xl p-4 flex flex-col items-center justify-center text-center">
+                                <span class="text-[10px] text-cyber-textMuted font-mono uppercase tracking-wider">夏普比率</span>
+                                <span class="text-sm font-bold text-cyan-400 mt-1 tracking-tight">
+                                    {{ backtestResult ? backtestResult.metrics.sharpe_ratio : '--' }}
+                                </span>
+                            </div>
+                            <div class="glass-card rounded-xl p-4 flex flex-col items-center justify-center text-center">
+                                <span class="text-[10px] text-cyber-textMuted font-mono uppercase tracking-wider">最大回撤</span>
+                                <span class="text-sm font-bold text-rose-400 mt-1 tracking-tight">
+                                    {{ backtestResult ? backtestResult.metrics.max_drawdown + '%' : '--' }}
+                                </span>
+                            </div>
+                            <div class="glass-card rounded-xl p-4 flex flex-col items-center justify-center text-center">
+                                <span class="text-[10px] text-cyber-textMuted font-mono uppercase tracking-wider">卡玛比率</span>
+                                <span class="text-sm font-bold text-amber-400 mt-1 tracking-tight">
+                                    {{ backtestResult ? backtestResult.metrics.calmar_ratio : '--' }}
+                                </span>
+                            </div>
+                            <div class="glass-card rounded-xl p-4 flex flex-col items-center justify-center text-center">
+                                <span class="text-[10px] text-cyber-textMuted font-mono uppercase tracking-wider">交易胜率 / 盈亏比</span>
+                                <span class="text-[11px] font-bold text-emerald-400 mt-1 tracking-tight">
+                                    {{ backtestResult ? backtestResult.metrics.win_rate + '% / ' + backtestResult.metrics.profit_loss_ratio : '--' }}
+                                </span>
+                            </div>
+                        </div>
+
+                        <!-- ECharts Container Card -->
+                        <div class="glass-card rounded-2xl p-6 relative">
+                            <div class="flex justify-between items-center flex-wrap gap-4 border-b border-white/5 pb-4 mb-4">
+                                <div class="chart-title text-sm font-semibold flex items-center gap-2" style="border:none; margin:0; padding:0;">
+                                    <span>📈</span> 系统资金净值与最大回撤收益时序图 (Dual Y-Axis Overlay)
+                                </div>
+                                <div class="text-[10px] text-cyber-textMuted font-mono bg-white/5 border border-white/5 rounded px-2 py-0.5" v-if="backtestResult">
+                                    计算耗时: {{ backtestResult.elapsed_seconds }}秒
+                                </div>
+                            </div>
+                            
+                            <div class="w-full h-[380px] flex items-center justify-center relative" id="chart-backtest-equity-container">
+                                <div v-if="!backtestResult" class="text-cyber-textMuted text-xs flex flex-col items-center justify-center gap-3">
+                                    <span class="text-3xl animate-pulse">📊</span>
+                                    <span>未加载任何回测结果。请在左侧控制台配置参数，点击“启动极速系统调仓回测”</span>
+                                </div>
+                                <div id="chart-backtest-equity" class="w-full h-full" v-show="backtestResult"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Bottom: Transaction Ledger -->
+                <div class="glass-card rounded-2xl p-6 space-y-4" v-if="backtestResult && backtestResult.trades.length > 0">
+                    <div class="flex justify-between items-center border-b border-white/5 pb-4">
+                        <div class="chart-title text-sm font-semibold flex items-center gap-2" style="border:none; margin:0; padding:0;">
+                            <span>⏱️</span> 系统成交及平仓风控日志 (Transaction Ledger)
+                        </div>
+                        <span class="text-[10px] text-cyber-textMuted font-mono">共 {{ backtestResult.trades.length }} 笔成交记录</span>
+                    </div>
+
+                    <div class="overflow-x-auto font-mono">
+                        <table class="w-full text-left border-collapse text-xs">
+                            <thead>
+                                <tr class="border-b border-white/10 text-cyber-textMuted font-semibold">
+                                    <th class="py-3 px-4 font-mono">交易日期</th>
+                                    <th class="py-3 px-4">股票名称</th>
+                                    <th class="py-3 px-4 font-mono">代码</th>
+                                    <th class="py-3 px-4 text-center">方向</th>
+                                    <th class="py-3 px-4 text-right">成交价</th>
+                                    <th class="py-3 px-4 text-right">数量(股)</th>
+                                    <th class="py-3 px-4 text-right">费用/税率</th>
+                                    <th class="py-3 px-4 text-right">盈亏(%)</th>
+                                    <th class="py-3 px-4 text-right">平仓/进场原因</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr v-for="(t, idx) in backtestResult.trades" :key="idx" class="border-b border-white/5 hover:bg-white/5 transition-all">
+                                    <td class="py-3 px-4 font-mono text-cyber-textMuted">{{ t.date }}</td>
+                                    <td class="py-3 px-4 font-semibold text-white">{{ t.name }}</td>
+                                    <td class="py-3 px-4 font-mono text-cyber-textMuted">{{ t.symbol }}</td>
+                                    <td class="py-3 px-4 text-center">
+                                        <span :class="['px-2 py-0.5 rounded text-[10px] font-bold', t.action === 'BUY' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-rose-500/10 text-rose-400 border border-rose-500/20']">
+                                            {{ t.action === 'BUY' ? '买入' : '卖出' }}
+                                        </span>
+                                    </td>
+                                    <td class="py-3 px-4 text-right font-mono text-white">{{ t.price.toFixed(2) }} 元</td>
+                                    <td class="py-3 px-4 text-right font-mono text-cyber-textMuted">{{ t.qty.toLocaleString() }}</td>
+                                    <td class="py-3 px-4 text-right font-mono text-rose-400/80">{{ t.commission.toFixed(2) }} 元</td>
+                                    <td class="py-3 px-4 text-right font-mono font-bold" :class="[t.action === 'SELL' ? (t.pnl >= 0 ? 'text-emerald-400' : 'text-rose-400') : 'text-cyber-textMuted']">
+                                        {{ t.action === 'SELL' ? (t.pnl >= 0 ? '+' : '') + t.pnl.toFixed(2) + '%' : '--' }}
+                                    </td>
+                                    <td class="py-3 px-4 text-right font-semibold" :class="[t.action === 'SELL' ? (t.pnl >= 0 ? 'text-emerald-400/90' : 'text-rose-400/90') : 'text-cyan-400/90']">
+                                        {{ t.reason }}
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
             <!-- ======================= 🌊 TAB 3: 大势分析 ======================= -->
             <div v-show="activeTab === 'analysis'" class="space-y-8">
                 <!-- 🧱 30日板块资金时序折线图 -->
@@ -581,6 +834,291 @@
                                     </template>
                                 </tbody>
                             </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ======================= 🔍 TAB 3.5: 个股分析 ======================= -->
+            <div v-show="activeTab === 'stock_analysis'" class="space-y-8 relative min-h-[500px]">
+                <!-- 离线锁定效果遮罩 -->
+                <div v-if="isOffline" class="absolute inset-0 bg-[#06090f]/75 backdrop-blur-md flex flex-col items-center justify-center text-center p-8 space-y-4 z-10 rounded-2xl">
+                    <div class="text-3xl animate-bounce">🔒</div>
+                    <h4 class="font-outfit font-bold text-base text-white">个股量化终端已锁定</h4>
+                    <p class="text-xs text-cyber-textMuted max-w-md leading-relaxed">
+                        个股多维规律量化分析需要由后端高并发 DuckDB 引擎和本地通达信 Parquet 数据集提供支持。请在终端运行 <code>python server.py</code> 并访问 <code>http://localhost:8000/</code> 解锁此功能！
+                    </p>
+                </div>
+
+                <!-- 🔍 顶部搜索与核心看板 -->
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                    <!-- 搜索与个股基础信息卡片 -->
+                    <div class="glass-card rounded-2xl p-6 flex flex-col justify-between space-y-6 relative overflow-hidden">
+                        <div>
+                            <div class="text-sm font-semibold border-b border-white/5 pb-3 flex items-center justify-between">
+                                <span class="flex items-center gap-2"><span>🔍</span> 个股规律多维特征提取</span>
+                            </div>
+                            
+                            <!-- 搜索框 -->
+                            <div class="mt-4 flex gap-2">
+                                <input type="text" 
+                                       v-model="stockSearchSymbol" 
+                                       @keyup.enter="runStockAnalysis(stockSearchSymbol)"
+                                       placeholder="输入代码或简拼，如 600000 或 sh600000" 
+                                       class="flex-1 bg-cyber-base/80 border border-cyber-border rounded-xl px-4 py-2 text-xs focus:outline-none focus:border-cyber-primary transition-all font-mono">
+                                <button @click="runStockAnalysis(stockSearchSymbol)" 
+                                        :disabled="stockAnalysisLoading"
+                                        class="bg-gradient-to-r from-cyber-primary to-cyber-secondary hover:opacity-90 disabled:opacity-50 text-white font-semibold px-4 py-2 rounded-xl text-xs flex items-center justify-center gap-1.5 transition-all shadow-[0_0_10px_rgba(6,182,212,0.1)]">
+                                    <span v-if="stockAnalysisLoading">分析中...</span>
+                                    <span v-else>开始量化</span>
+                                </button>
+                            </div>
+                            
+                            <div v-if="stockAnalysisError" class="mt-3 text-xs text-cyber-up">
+                                ⚠️ {{ stockAnalysisError }}
+                            </div>
+                        </div>
+
+                        <!-- 个股基础卡片 -->
+                        <div v-if="stockAnalysisData" class="space-y-4 pt-4 border-t border-white/5">
+                            <div class="flex items-baseline justify-between">
+                                <div>
+                                    <span class="font-outfit font-bold text-2xl tracking-wide text-white">{{ stockAnalysisData.name }}</span>
+                                    <span class="font-mono text-xs text-cyber-textMuted ml-2">{{ stockAnalysisData.symbol }}</span>
+                                </div>
+                                <div :class="['font-mono font-bold text-lg', stockAnalysisData.features.price.pct_change >= 0 ? 'text-cyber-up' : 'text-cyber-down']">
+                                    {{ stockAnalysisData.features.price.close }} 
+                                    <span class="text-xs">({{ stockAnalysisData.features.price.pct_change >= 0 ? '+' : '' }}{{ stockAnalysisData.features.price.pct_change }}%)</span>
+                                </div>
+                            </div>
+
+                            <div class="space-y-2">
+                                <div class="flex flex-wrap gap-1.5">
+                                    <span v-for="ind in stockAnalysisData.industries.slice(0, 2)" :key="ind" class="bg-cyber-secondary/10 border border-cyber-secondary/20 text-cyber-secondary text-[10px] px-2 py-0.5 rounded font-medium">
+                                        💼 {{ ind }}
+                                    </span>
+                                    <span v-for="con in stockAnalysisData.concepts.slice(0, 3)" :key="con" class="bg-cyber-accent/10 border border-cyber-accent/20 text-cyber-accent text-[10px] px-2 py-0.5 rounded font-medium">
+                                        🏷️ {{ con }}
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div v-else class="text-center py-8 text-cyber-textMuted text-xs">
+                            请输入股票代码并点击量化分析按钮开始
+                        </div>
+                    </div>
+
+                    <!-- 🌟 智能决策与核心量化预测 KPI 看板 -->
+                    <div class="glass-card rounded-2xl p-6 lg:col-span-2 space-y-6 flex flex-col justify-between">
+                        <div class="text-sm font-semibold border-b border-white/5 pb-3 flex items-center justify-between">
+                            <span class="flex items-center gap-2"><span>🔮</span> 未来 5 日量化走势推演 (大样本概率)</span>
+                        </div>
+
+                        <!-- KPI 看板 -->
+                        <div v-if="stockAnalysisData" class="grid grid-cols-3 gap-4 my-2">
+                            <!-- 胜率 -->
+                            <div class="bg-white/5 border border-white/5 rounded-xl p-4 text-center">
+                                <p class="text-[10px] text-cyber-textMuted font-medium mb-1">未来 5 日上涨概率</p>
+                                <h3 :class="['font-outfit font-bold text-3xl', stockAnalysisData.predictions.win_rate >= 50 ? 'text-cyber-up' : 'text-cyber-down']">
+                                    {{ stockAnalysisData.predictions.win_rate }}%
+                                </h3>
+                            </div>
+                            <!-- 收益率 -->
+                            <div class="bg-white/5 border border-white/5 rounded-xl p-4 text-center">
+                                <p class="text-[10px] text-cyber-textMuted font-medium mb-1">期望期望收益率</p>
+                                <h3 :class="['font-outfit font-bold text-3xl', stockAnalysisData.predictions.expected_return >= 0 ? 'text-cyber-up' : 'text-cyber-down']">
+                                    {{ stockAnalysisData.predictions.expected_return >= 0 ? '+' : '' }}{{ stockAnalysisData.predictions.expected_return }}%
+                                </h3>
+                            </div>
+                            <!-- 收益风险比 -->
+                            <div class="bg-white/5 border border-white/5 rounded-xl p-4 text-center">
+                                <p class="text-[10px] text-cyber-textMuted font-medium mb-1">期望收益风险比</p>
+                                <h3 :class="['font-outfit font-bold text-3xl', stockAnalysisData.predictions.risk_reward_ratio >= 1.2 ? 'text-cyber-accent' : 'text-cyber-textMuted']">
+                                    {{ stockAnalysisData.predictions.risk_reward_ratio }}
+                                </h3>
+                            </div>
+                        </div>
+
+                        <!-- 智能建议区 -->
+                        <div v-if="stockAnalysisData" :class="['border p-4 rounded-xl text-xs leading-relaxed flex items-start gap-2.5 transition-all', getSuggestionClass(stockAnalysisData.suggestions.color)]">
+                            <div class="mt-0.5">{{ stockAnalysisData.suggestions.color === 'cyber-up' ? '🚀' : (stockAnalysisData.suggestions.color === 'cyber-down' ? '🛡️' : '🔔') }}</div>
+                            <div>
+                                <span class="font-bold block mb-1">系统量化诊断：</span>
+                                {{ stockAnalysisData.suggestions.text }}
+                            </div>
+                        </div>
+                        
+                        <div v-else class="text-center py-12 text-cyber-textMuted text-xs">
+                            等待获取量化特征分析数据...
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 📊 多维特征分析网格 (3列) -->
+                <div v-if="stockAnalysisData" class="grid grid-cols-1 md:grid-cols-3 gap-8">
+                    <!-- 价格与均线特征 -->
+                    <div class="glass-card rounded-2xl p-6 space-y-4">
+                        <div class="text-xs font-bold border-b border-white/5 pb-2.5 text-cyber-primary flex items-center gap-1.5">
+                            <span>📈</span> 价格 & 均线系统特征
+                        </div>
+                        <div class="space-y-3 text-xs">
+                            <div class="flex justify-between">
+                                <span class="text-cyber-textMuted">MA5 / MA10 / MA20</span>
+                                <span class="font-mono text-white">{{ stockAnalysisData.features.ma.ma5 }} / {{ stockAnalysisData.features.ma.ma10 }} / {{ stockAnalysisData.features.ma.ma20 }}</span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span class="text-cyber-textMuted">MA30 / MA60 / MA120</span>
+                                <span class="font-mono text-white">{{ stockAnalysisData.features.ma.ma30 }} / {{ stockAnalysisData.features.ma.ma60 }} / {{ stockAnalysisData.features.ma.ma120 }}</span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span class="text-cyber-textMuted">偏离生命均线程度</span>
+                                <span :class="['font-mono font-bold', stockAnalysisData.features.ma.dev_ma20 >= 0 ? 'text-cyber-up' : 'text-cyber-down']">
+                                    {{ stockAnalysisData.features.ma.dev_ma20 >= 0 ? '偏离上方' : '偏离下方' }} {{ Math.abs(stockAnalysisData.features.ma.dev_ma20) }}%
+                                </span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span class="text-cyber-textMuted">生命线斜率 (20日/30日)</span>
+                                <span class="font-mono text-white">
+                                    <span :class="stockAnalysisData.features.ma.slope_ma20 >= 0 ? 'text-cyber-up' : 'text-cyber-down'">{{ stockAnalysisData.features.ma.slope_ma20 }}%</span>
+                                    /
+                                    <span :class="stockAnalysisData.features.ma.slope_ma30 >= 0 ? 'text-cyber-up' : 'text-cyber-down'">{{ stockAnalysisData.features.ma.slope_ma30 }}%</span>
+                                </span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span class="text-cyber-textMuted">250日最高 / 最低</span>
+                                <span class="font-mono text-white">{{ stockAnalysisData.features.price.high_250d }} / {{ stockAnalysisData.features.price.low_250d }}</span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span class="text-cyber-textMuted">距离250日最高回撤</span>
+                                <span class="font-mono text-cyber-down">{{ stockAnalysisData.features.price.dist_high_pct }}%</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 量能与波动率特征 -->
+                    <div class="glass-card rounded-2xl p-6 space-y-4">
+                        <div class="text-xs font-bold border-b border-white/5 pb-2.5 text-cyber-secondary flex items-center gap-1.5">
+                            <span>📊</span> 量能 & 波动率特征
+                        </div>
+                        <div class="space-y-3 text-xs">
+                            <div class="flex justify-between">
+                                <span class="text-cyber-textMuted">今日成交量 (手)</span>
+                                <span class="font-mono text-white">{{ formatLargeNumber(stockAnalysisData.features.volume.volume) }}</span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span class="text-cyber-textMuted">今日成交额 (亿元)</span>
+                                <span class="font-mono text-white">{{ stockAnalysisData.features.volume.amount_billions }} 亿</span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span class="text-cyber-textMuted">5日成交量比 (量比)</span>
+                                <span :class="['font-mono font-bold', stockAnalysisData.features.volume.vol_ratio_5d >= 1.5 ? 'text-cyber-up' : (stockAnalysisData.features.volume.vol_ratio_5d < 0.8 ? 'text-cyber-down' : 'text-cyber-textMuted')]">
+                                    {{ stockAnalysisData.features.volume.vol_ratio_5d }}
+                                </span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span class="text-cyber-textMuted">20日成交量比</span>
+                                <span class="font-mono text-white">{{ stockAnalysisData.features.volume.vol_ratio_20d }}</span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span class="text-cyber-textMuted">20日历史波动率 (年化)</span>
+                                <span class="font-mono text-white">{{ stockAnalysisData.features.volatility.volatility_20d }}%</span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span class="text-cyber-textMuted">波动等级评估</span>
+                                <span class="font-mono text-cyber-accent font-bold">{{ stockAnalysisData.features.volatility.risk_level }}</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 市场与大盘环境特征 -->
+                    <div class="glass-card rounded-2xl p-6 space-y-4">
+                        <div class="text-xs font-bold border-b border-white/5 pb-2.5 text-cyber-accent flex items-center gap-1.5">
+                            <span>🌌</span> 市场环境特征
+                        </div>
+                        <div class="space-y-3 text-xs">
+                            <div class="flex justify-between">
+                                <span class="text-cyber-textMuted">全A大盘多空情绪</span>
+                                <span :class="['font-mono font-bold', stockAnalysisData.features.market.market_temp >= 50 ? 'text-cyber-up' : 'text-cyber-down']">
+                                    {{ stockAnalysisData.features.market.market_temp }} 度
+                                </span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span class="text-cyber-textMuted">大盘运行所处周期</span>
+                                <span class="font-mono text-white font-semibold">{{ stockAnalysisData.features.market.market_env }}</span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span class="text-cyber-textMuted">多头共振条件</span>
+                                <span :class="['font-mono font-bold', stockAnalysisData.features.market.market_temp > 60 && stockAnalysisData.features.ma.slope_ma20 > 0 ? 'text-cyber-up' : 'text-cyber-textMuted']">
+                                    {{ stockAnalysisData.features.market.market_temp > 60 && stockAnalysisData.features.ma.slope_ma20 > 0 ? '满足' : '不满足' }}
+                                </span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span class="text-cyber-textMuted">同行业联动性</span>
+                                <span class="font-mono text-white font-semibold">较强</span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span class="text-cyber-textMuted">超短线回撤风险</span>
+                                <span :class="['font-mono font-bold', stockAnalysisData.features.ma.dev_ma20 > 8 ? 'text-cyber-up' : 'text-cyber-down']">
+                                    {{ stockAnalysisData.features.ma.dev_ma20 > 8 ? '过热 (高)' : '安全 (正常)' }}
+                                </span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span class="text-cyber-textMuted">板块题材热度</span>
+                                <span class="font-mono text-cyber-primary font-bold">主流题材</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 📊 两栏布局：左侧 K线走势，右侧 历史规律胜率大样本统计 -->
+                <div v-if="stockAnalysisData" class="grid grid-cols-1 lg:grid-cols-5 gap-8">
+                    <!-- 左侧：K线与均线走势图 -->
+                    <div class="glass-card rounded-2xl p-6 lg:col-span-3 space-y-4">
+                        <div class="text-xs font-bold border-b border-white/5 pb-2.5 flex items-center justify-between">
+                            <span class="flex items-center gap-1.5 text-cyber-primary"><span>📈</span> 走势曲线与生命线叠合 (近 90 交易日)</span>
+                            <span class="text-[10px] text-cyber-textMuted font-mono">MA20黄色，MA30紫色</span>
+                        </div>
+                        <div id="chart-stock-price" class="w-full h-[380px]"></div>
+                    </div>
+
+                    <!-- 右侧：量化规律大样本历史回测 -->
+                    <div class="glass-card rounded-2xl p-6 lg:col-span-2 space-y-4">
+                        <div class="text-xs font-bold border-b border-white/5 pb-2.5 text-cyber-accent flex items-center gap-1.5">
+                            <span>🔬</span> 量化走势规律历史大样本仿真统计
+                        </div>
+                        
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-left border-collapse">
+                                <thead>
+                                    <tr class="border-b border-white/5 text-[10px] text-cyber-textMuted">
+                                        <th class="py-2.5 px-3 font-semibold">量化运行规律</th>
+                                        <th class="py-2.5 px-3 font-semibold text-right">触及样本数</th>
+                                        <th class="py-2.5 px-3 font-semibold text-right">历史胜率</th>
+                                        <th class="py-2.5 px-3 font-semibold text-right">未来5日均益</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="text-xs font-mono">
+                                    <tr v-for="pat in stockAnalysisData.patterns" :key="pat.name" class="border-b border-white/5 hover:bg-white/5 transition-all">
+                                        <td class="py-3 px-3 font-sans text-white">{{ pat.name }}</td>
+                                        <td class="py-3 px-3 text-right text-cyber-textMuted">{{ pat.count }} 次</td>
+                                        <td :class="['py-3 px-3 text-right font-bold', pat.win_rate >= 55 ? 'text-cyber-up' : 'text-cyber-down']">
+                                            {{ pat.win_rate }}%
+                                        </td>
+                                        <td :class="['py-3 px-3 text-right font-bold', pat.avg_return >= 0 ? 'text-cyber-up' : 'text-cyber-down']">
+                                            {{ pat.avg_return >= 0 ? '+' : '' }}{{ pat.avg_return }}%
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <div class="bg-cyber-base/50 border border-white/5 p-4 rounded-xl text-[10px] text-cyber-textMuted leading-relaxed space-y-1">
+                            <span class="text-white font-bold block mb-1">规律量化逻辑说明：</span>
+                            <p>1. <b>放量突破规律</b>: 收盘突破 MA20 且成交量超过 5 日均量 1.5 倍；</p>
+                            <p>2. <b>生命均线支撑规律</b>: 当日最低价跌穿 MA20 且收盘拉回在 MA20 之上；</p>
+                            <p>3. <b>超跌极值反弹规律</b>: 股价收盘在 MA20 下方偏离 12% 且当日大涨 >=3%；</p>
+                            <p>4. <b>缩量洗盘突破规律</b>: 近 15 日最大单日涨幅 >=7% 且成交量低于 20 日均量 0.65 倍。</p>
                         </div>
                     </div>
                 </div>
@@ -792,6 +1330,43 @@
                 const sortOrder = ref("desc");
                 const overviewLoading = ref(false);
 
+                // 1.5. 组合回测 state
+                const backtestParams = ref({
+                    strategy_id: "resonance_breakout",
+                    start_date: "2023-01-01",
+                    end_date: "2025-12-31",
+                    initial_cash: 1000000.0,
+                    stop_loss_pct: 8.0,
+                    trailing_stop_pct: 6.0,
+                    ma_breakout_exit: true,
+                    holding_days: 10,
+                    max_stocks: 5,
+                    rebalance_period: "weekly",
+                    commission_pct: 0.03,
+                    stamp_duty_pct: 0.1,
+                    slippage_pct: 0.1,
+                    benchmark_id: "sh000300"
+                });
+                const backtestLoading = ref(false);
+                const backtestResult = ref(null);
+                const backtestError = ref("");
+
+                const stockStrategies = computed(() => {
+                    const validKeys = [
+                        "resonance_breakout",
+                        "ma_long_sequence",
+                        "dual_resonance",
+                        "n_day_climbing",
+                        "extreme_oversold_reversal",
+                        "volume_dry_breakout",
+                        "institution_accumulation",
+                        "ma250_gravity_resonance",
+                        "high_relative_strength",
+                        "historical_high_breakout"
+                    ];
+                    return strategies.value.filter(s => validKeys.includes(s.id));
+                });
+
                 // 2. 市场大势 state
                 const marketData = ref({});
                 const currentFlowType = ref("industry");
@@ -818,12 +1393,399 @@
                 const selectedReport = ref(null);
                 const renderedMarkdown = ref("<p style='text-align:center; color:#9ca3af; padding-top:4rem; font-size:12px;'>请在左侧报告归档列表中点击，即可直接流式渲染并深度解析 Markdown 大势与选股战报...</p>");
 
+                // 5. 个股分析 state
+                const stockSearchSymbol = ref("600000");
+                const stockAnalysisData = ref(null);
+                const stockAnalysisLoading = ref(false);
+                const stockAnalysisError = ref("");
+                let stockChartInstance = null;
+
+                const getSuggestionClass = (color) => {
+                    switch (color) {
+                        case 'cyber-up': return 'text-cyber-up border-cyber-up/20 bg-cyber-up/5';
+                        case 'cyber-primary': return 'text-cyber-primary border-cyber-primary/20 bg-cyber-primary/5';
+                        case 'cyber-accent': return 'text-cyber-accent border-cyber-accent/20 bg-cyber-accent/5';
+                        case 'cyber-down': return 'text-cyber-down border-cyber-down/20 bg-cyber-down/5';
+                        default: return 'text-cyber-textMuted border-white/10 bg-white/5';
+                    }
+                };
+
+                const formatLargeNumber = (num) => {
+                    if (!num && num !== 0) return "--";
+                    if (num >= 100000000) {
+                        return (num / 100000000).toFixed(2) + " 亿";
+                    } else if (num >= 10000) {
+                        return (num / 10000).toFixed(2) + " 万";
+                    }
+                    return num.toLocaleString();
+                };
+
+                const runStockAnalysis = async (symbol) => {
+                    if (!symbol) {
+                        stockAnalysisError.value = "请输入股票代码！";
+                        return;
+                    }
+                    stockAnalysisLoading.value = true;
+                    stockAnalysisError.value = "";
+                    try {
+                        const res = await fetch(`/api/stock/analyze?symbol=${encodeURIComponent(symbol)}`);
+                        if (!res.ok) {
+                            const errData = await res.json();
+                            throw new Error(errData.message || "请求量化特征失败");
+                        }
+                        const data = await res.json();
+                        if (data.status === "success") {
+                            stockAnalysisData.value = data;
+                            stockSearchSymbol.value = data.symbol;
+                            nextTick(() => {
+                                initStockPriceChart();
+                            });
+                        } else {
+                            throw new Error(data.message || "特征数据解析异常");
+                        }
+                    } catch (e) {
+                        stockAnalysisError.value = e.message;
+                        console.error(e);
+                    } finally {
+                        stockAnalysisLoading.value = false;
+                    }
+                };
+
+                const initStockPriceChart = () => {
+                    const dom = document.getElementById("chart-stock-price");
+                    if (!dom || !stockAnalysisData.value) return;
+
+                    if (!stockChartInstance) {
+                        stockChartInstance = echarts.init(dom);
+                        window.addEventListener('resize', () => {
+                            if (stockChartInstance) stockChartInstance.resize();
+                        });
+                    }
+
+                    const cData = stockAnalysisData.value.chart_data;
+                    if (!cData || !cData.dates || cData.dates.length === 0) return;
+
+                    const mc = stockAnalysisData.value.monte_carlo;
+                    
+                    let allDates = cData.dates;
+                    let histClose = cData.close;
+                    let histMa20 = cData.ma20;
+                    let histMa30 = cData.ma30;
+                    
+                    let extraSeries = [];
+                    let legendData = ['收盘价', 'MA20生命线', 'MA30辅助线'];
+                    
+                    if (mc && mc.dates) {
+                        const padLength = mc.dates.length - 1; // 10 days
+                        allDates = [...cData.dates, ...mc.dates.slice(1)];
+                        histClose = [...cData.close, ...Array(padLength).fill(null)];
+                        histMa20 = [...cData.ma20, ...Array(padLength).fill(null)];
+                        histMa30 = [...cData.ma30, ...Array(padLength).fill(null)];
+                        
+                        const histLength = cData.dates.length;
+                        const mcPad = Array(histLength - 1).fill(null);
+                        
+                        const mcP50 = [...mcPad, ...mc.p50];
+                        const mcP95 = [...mcPad, ...mc.p95];
+                        const mcP84 = [...mcPad, ...mc.p84];
+                        const mcP16 = [...mcPad, ...mc.p16];
+                        const mcP5 = [...mcPad, ...mc.p5];
+                        
+                        legendData = ['收盘价', 'MA20生命线', 'MA30辅助线', '预测中位数', '置信上限 (P95)', '置信下限 (P5)'];
+                        
+                        extraSeries = [
+                            {
+                                name: '预测中位数',
+                                type: "line",
+                                data: mcP50,
+                                smooth: true,
+                                lineStyle: { width: 2.2, color: '#06b6d4', type: 'solid' },
+                                symbol: 'none'
+                            },
+                            {
+                                name: '置信上限 (P95)',
+                                type: "line",
+                                data: mcP95,
+                                smooth: true,
+                                lineStyle: { width: 1.2, color: '#ef4444', type: 'dashed' },
+                                symbol: 'none'
+                            },
+                            {
+                                name: '置信下限 (P5)',
+                                type: "line",
+                                data: mcP5,
+                                smooth: true,
+                                lineStyle: { width: 1.2, color: '#10b981', type: 'dashed' },
+                                symbol: 'none'
+                            },
+                            {
+                                name: 'P84(偏多界)',
+                                type: "line",
+                                data: [...mcPad, ...mc.p84],
+                                smooth: true,
+                                lineStyle: { width: 1.0, color: 'rgba(239, 68, 68, 0.45)', type: 'dotted' },
+                                symbol: 'none'
+                            },
+                            {
+                                name: 'P16(偏空界)',
+                                type: "line",
+                                data: [...mcPad, ...mc.p16],
+                                smooth: true,
+                                lineStyle: { width: 1.0, color: 'rgba(16, 185, 129, 0.45)', type: 'dotted' },
+                                symbol: 'none'
+                            }
+                        ];
+                        
+                        if (mc.samples && mc.samples.length >= 3) {
+                            mc.samples.forEach((sample, idx) => {
+                                extraSeries.push({
+                                    name: `随机试验路径 ${idx + 1}`,
+                                    type: "line",
+                                    data: [...mcPad, ...sample],
+                                    smooth: true,
+                                    lineStyle: { width: 0.6, color: 'rgba(148, 163, 184, 0.25)', type: 'solid' },
+                                    symbol: 'none'
+                                });
+                            });
+                        }
+                    }
+
+                    const option = {
+                        backgroundColor: 'transparent',
+                        tooltip: {
+                            trigger: 'axis',
+                            axisPointer: { type: 'cross', label: { backgroundColor: '#1f2937' } },
+                            backgroundColor: 'rgba(13, 20, 35, 0.9)',
+                            borderColor: 'rgba(255, 255, 255, 0.1)',
+                            textStyle: { color: '#f3f4f6' }
+                        },
+                        legend: {
+                            data: legendData,
+                            textStyle: { color: '#9ca3af', fontSize: 10 },
+                            top: '2%',
+                            left: 'center'
+                        },
+                        grid: { left: '3%', right: '4%', bottom: '10%', top: '16%', containLabel: true },
+                        xAxis: {
+                            type: 'category',
+                            boundaryGap: false,
+                            data: allDates,
+                            axisLabel: { color: '#9ca3af', fontSize: 10 },
+                            axisLine: { lineStyle: { color: 'rgba(255, 255, 255, 0.08)' } }
+                        },
+                        yAxis: {
+                            type: 'value',
+                            scale: true,
+                            name: "股价 (元)",
+                            nameTextStyle: { color: '#9ca3af', fontSize: 10 },
+                            axisLabel: { color: '#9ca3af', formatter: '{value} 元' },
+                            splitLine: { lineStyle: { color: 'rgba(255, 255, 255, 0.03)' } }
+                        },
+                        series: [
+                            {
+                                name: '收盘价',
+                                type: "line",
+                                data: histClose,
+                                smooth: true,
+                                lineStyle: { width: 2.5, color: '#06b6d4' },
+                                areaStyle: {
+                                    color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                                        { offset: 0, color: 'rgba(6, 182, 212, 0.18)' },
+                                        { offset: 1, color: 'rgba(6, 182, 212, 0.0)' }
+                                    ])
+                                },
+                                symbol: 'none'
+                            },
+                            {
+                                name: 'MA20生命线',
+                                type: "line",
+                                data: histMa20,
+                                smooth: true,
+                                lineStyle: { width: 1.5, color: '#f59e0b', type: 'solid' },
+                                symbol: 'none'
+                            },
+                            {
+                                name: 'MA30辅助线',
+                                type: "line",
+                                data: histMa30,
+                                smooth: true,
+                                lineStyle: { width: 1.5, color: '#a855f7', type: 'dashed' },
+                                symbol: 'none'
+                            },
+                            ...extraSeries
+                        ]
+                    };
+
+                    stockChartInstance.setOption(option, true);
+                    
+                    // 核心修复: 无论首次加载还是 tab 隐藏切换，强制以可见 DOM 真实宽度进行 resize 重绘，彻底摆脱 100px 压缩限制
+                    nextTick(() => {
+                        if (stockChartInstance) {
+                            stockChartInstance.resize();
+                        }
+                    });
+                };
+
+                // -------------------------------------------------------------
+                // ⏱️ 组合回测 Methods
+                // -------------------------------------------------------------
+                let backtestChartInstance = null;
+
+                const initBacktestChart = () => {
+                    const dom = document.getElementById("chart-backtest-equity");
+                    if (!dom || !backtestResult.value) return;
+
+                    if (!backtestChartInstance) {
+                        backtestChartInstance = echarts.init(dom);
+                        window.addEventListener('resize', () => {
+                            if (backtestChartInstance) backtestChartInstance.resize();
+                        });
+                    }
+
+                    const history = backtestResult.value.history;
+                    if (!history || history.length === 0) return;
+
+                    const dates = history.map(h => h.date);
+                    const strategyValues = history.map(h => h.total_value);
+                    const benchmarkValues = history.map(h => h.benchmark_value);
+                    const drawdowns = history.map(h => h.drawdown);
+
+                    const option = {
+                        backgroundColor: 'transparent',
+                        tooltip: {
+                            trigger: 'axis',
+                            axisPointer: { type: 'cross', label: { backgroundColor: '#1f2937' } },
+                            backgroundColor: 'rgba(13, 20, 35, 0.9)',
+                            borderColor: 'rgba(255, 255, 255, 0.1)',
+                            textStyle: { color: '#f3f4f6' }
+                        },
+                        legend: {
+                            data: ['策略净值 (Strategy NAV)', '基准净值 (Benchmark NAV)', '回撤深度 (Drawdown)'],
+                            textStyle: { color: '#9ca3af', fontSize: 10 },
+                            top: '2%',
+                            left: 'center'
+                        },
+                        grid: { left: '3%', right: '4%', bottom: '10%', top: '16%', containLabel: true },
+                        xAxis: {
+                            type: 'category',
+                            boundaryGap: false,
+                            data: dates,
+                            axisLabel: { color: '#9ca3af', fontSize: 10 },
+                            axisLine: { lineStyle: { color: 'rgba(255, 255, 255, 0.08)' } }
+                        },
+                        yAxis: [
+                            {
+                                type: 'value',
+                                scale: true,
+                                name: "资金净值 (元)",
+                                nameTextStyle: { color: '#9ca3af', fontSize: 10 },
+                                axisLabel: { color: '#9ca3af', formatter: (val) => (val / 10000).toFixed(0) + '万' },
+                                splitLine: { lineStyle: { color: 'rgba(255, 255, 255, 0.03)' } }
+                            },
+                            {
+                                type: 'value',
+                                name: "回撤幅度 (%)",
+                                nameTextStyle: { color: '#f87171', fontSize: 10 },
+                                axisLabel: { color: '#f87171', formatter: '{value}%' },
+                                min: -50,
+                                max: 0,
+                                splitLine: { show: false }
+                            }
+                        ],
+                        series: [
+                            {
+                                name: '策略净值 (Strategy NAV)',
+                                type: "line",
+                                data: strategyValues,
+                                smooth: true,
+                                lineStyle: { width: 2.5, color: '#06b6d4' },
+                                areaStyle: {
+                                    color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                                        { offset: 0, color: 'rgba(6, 182, 212, 0.18)' },
+                                        { offset: 1, color: 'rgba(6, 182, 212, 0.0)' }
+                                    ])
+                                },
+                                symbol: 'none'
+                            },
+                            {
+                                name: '基准净值 (Benchmark NAV)',
+                                type: "line",
+                                data: benchmarkValues,
+                                smooth: true,
+                                lineStyle: { width: 1.5, color: '#9ca3af', type: 'dashed' },
+                                symbol: 'none'
+                            },
+                            {
+                                name: '回撤深度 (Drawdown)',
+                                type: "line",
+                                yAxisIndex: 1,
+                                data: drawdowns,
+                                smooth: true,
+                                lineStyle: { width: 1.0, color: 'rgba(239, 68, 68, 0.6)' },
+                                areaStyle: {
+                                    color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                                        { offset: 0, color: 'rgba(239, 68, 68, 0.15)' },
+                                        { offset: 1, color: 'rgba(239, 68, 68, 0.0)' }
+                                    ])
+                                },
+                                symbol: 'none'
+                            }
+                        ]
+                    };
+                    backtestChartInstance.setOption(option);
+
+                    nextTick(() => {
+                        if (backtestChartInstance) {
+                            backtestChartInstance.resize();
+                        }
+                    });
+                };
+
+                const runBacktest = async () => {
+                    backtestLoading.value = true;
+                    backtestError.value = "";
+                    backtestResult.value = null;
+                    try {
+                        const res = await fetch("/api/backtest", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify(backtestParams.value)
+                        });
+                        const data = await res.json();
+                        if (res.ok && data.status === "success") {
+                            backtestResult.value = data;
+                            nextTick(() => {
+                                initBacktestChart();
+                            });
+                        } else {
+                            backtestError.value = data.message || "回测计算失败";
+                        }
+                    } catch (e) {
+                        backtestError.value = "无法连接至后端组合回测服务器";
+                        console.error(e);
+                    } finally {
+                        backtestLoading.value = false;
+                    }
+                };
+
                 // 统一 Tab 切换，支持时序 ECharts 自适应重绘
                 const switchTab = (tab) => {
                     activeTab.value = tab;
                     if (tab === 'analysis') {
                         nextTick(() => {
                             initFlowChart();
+                        });
+                    } else if (tab === 'overview') {
+                        nextTick(() => {
+                            initTurnoverChart();
+                        });
+                    } else if (tab === 'stock_analysis') {
+                        nextTick(() => {
+                            initStockPriceChart();
+                        });
+                    } else if (tab === 'backtest') {
+                        nextTick(() => {
+                            initBacktestChart();
                         });
                     }
                 };
@@ -977,6 +1939,110 @@
                     };
 
                     chartFlowInstance.setOption(option, true);
+                };
+
+                let chartTurnoverInstance = null;
+                const initTurnoverChart = () => {
+                    const dom = document.getElementById("chart-turnover-trend");
+                    if (!dom) return;
+
+                    if (!chartTurnoverInstance) {
+                        chartTurnoverInstance = echarts.init(dom);
+                        window.addEventListener('resize', () => {
+                            if (chartTurnoverInstance) chartTurnoverInstance.resize();
+                        });
+                    }
+
+                    const tData = marketData.value.market_turnover;
+                    if (!tData || !tData.dates || tData.dates.length === 0) {
+                        return;
+                    }
+
+                    const option = {
+                        backgroundColor: 'transparent',
+                        tooltip: {
+                            trigger: 'axis',
+                            axisPointer: { type: 'cross', label: { backgroundColor: '#1f2937' } },
+                            backgroundColor: 'rgba(13, 20, 35, 0.9)',
+                            borderColor: 'rgba(255, 255, 255, 0.1)',
+                            textStyle: { color: '#f3f4f6' }
+                        },
+                        legend: {
+                            data: ['全A股', '上证', '深证', '创业板', '科创板', '北交所'],
+                            textStyle: { color: '#9ca3af', fontSize: 10 },
+                            bottom: 0
+                        },
+                        grid: { left: '3%', right: '4%', bottom: '15%', top: '10%', containLabel: true },
+                        xAxis: {
+                            type: 'category',
+                            boundaryGap: false,
+                            data: tData.dates,
+                            axisLabel: { color: '#9ca3af', fontSize: 10 },
+                            axisLine: { lineStyle: { color: 'rgba(255, 255, 255, 0.08)' } }
+                        },
+                        yAxis: {
+                            type: 'value',
+                            name: "成交额 (亿元)",
+                            nameTextStyle: { color: '#9ca3af', fontSize: 10 },
+                            axisLabel: { color: '#9ca3af', formatter: '{value} 亿' },
+                            splitLine: { lineStyle: { color: 'rgba(255, 255, 255, 0.03)' } }
+                        },
+                        color: ['#06b6d4', '#ef4444', '#3b82f6', '#f59e0b', '#a855f7', '#10b981'],
+                        series: [
+                            {
+                                name: '全A股',
+                                type: "line",
+                                data: tData.all,
+                                smooth: true,
+                                lineStyle: { width: 3 },
+                                symbol: 'circle',
+                                symbolSize: 6,
+                                showSymbol: false
+                            },
+                            {
+                                name: '上证',
+                                type: "line",
+                                data: tData.sh,
+                                smooth: true,
+                                lineStyle: { width: 2 },
+                                showSymbol: false
+                            },
+                            {
+                                name: '深证',
+                                type: "line",
+                                data: tData.sz,
+                                smooth: true,
+                                lineStyle: { width: 2 },
+                                showSymbol: false
+                            },
+                            {
+                                name: '创业板',
+                                type: "line",
+                                data: tData.cyb,
+                                smooth: true,
+                                lineStyle: { width: 2 },
+                                showSymbol: false
+                            },
+                            {
+                                name: '科创板',
+                                type: "line",
+                                data: tData.kcb,
+                                smooth: true,
+                                lineStyle: { width: 2 },
+                                showSymbol: false
+                            },
+                            {
+                                name: '北交所',
+                                type: "line",
+                                data: tData.bj,
+                                smooth: true,
+                                lineStyle: { width: 2 },
+                                showSymbol: false
+                            }
+                        ]
+                    };
+
+                    chartTurnoverInstance.setOption(option, true);
                 };
 
                 const switchFlowType = (type) => {
@@ -1252,6 +2318,12 @@
                     await loadMarketData();
                     await loadStrategiesList();
                     await loadReportsList();
+                    if (!isOffline.value) {
+                        runStockAnalysis(stockSearchSymbol.value);
+                    }
+                    nextTick(() => {
+                        initTurnoverChart();
+                    });
                 });
 
                 return {
@@ -1304,7 +2376,26 @@
                     reports,
                     selectedReport,
                     renderedMarkdown,
-                    loadReportContent
+                    loadReportContent,
+
+                    // 个股分析
+                    stockSearchSymbol,
+                    stockAnalysisData,
+                    stockAnalysisLoading,
+                    stockAnalysisError,
+                    getSuggestionClass,
+                    formatLargeNumber,
+                    runStockAnalysis,
+                    initStockPriceChart,
+
+                    // 组合回测
+                    backtestParams,
+                    backtestLoading,
+                    backtestResult,
+                    backtestError,
+                    stockStrategies,
+                    runBacktest,
+                    initBacktestChart
                 };
             }
         }).mount("#app");

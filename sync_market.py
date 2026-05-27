@@ -1,4 +1,5 @@
 import os
+import sys
 import json
 import time
 import multiprocessing
@@ -6,6 +7,12 @@ from multiprocessing import Pool
 import pandas as pd
 from parser import parse_tdx_day_file, parse_tdx_gbbq_file, compute_forward_adjustment, sync_all_blocks
 from storage import save_to_parquet
+
+# 强制 stdout / stderr 使用 UTF-8 编码，消除 Windows 平台下 Emoji 及中文打印的 UnicodeEncodeError 崩溃风险
+if sys.platform.startswith('win'):
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_STORE_DIR = os.path.join(CURRENT_DIR, "data")

@@ -6,6 +6,12 @@ import subprocess
 from datetime import datetime
 import pandas as pd
 
+# 强制 stdout / stderr 使用 UTF-8 编码，消除 Windows 平台下 Emoji 及中文打印的 UnicodeEncodeError 崩溃风险
+if sys.platform.startswith('win'):
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
+
 # -------------------------------------------------------------
 # 1. 动态检测并自动静默安装 DuckDB 库 (极致顺滑的免运维体验)
 # -------------------------------------------------------------
@@ -298,11 +304,14 @@ def main():
     limit_down = int(row_temp['limit_down'])
     median_return = float(row_temp['median_return'])
     trade_date = row_temp['trade_date']
-    if hasattr(trade_date, 'strftime'):
-        trade_date_str = trade_date.strftime('%Y-%m-%d')
+    if pd.notnull(trade_date) and hasattr(trade_date, 'strftime'):
+        try:
+            trade_date_str = trade_date.strftime('%Y-%m-%d')
+        except ValueError:
+            trade_date_str = str(trade_date)[:10] if pd.notnull(trade_date) else ""
     else:
         # 如果是数字类型，格式化为 YYYY-MM-DD
-        s = str(trade_date)
+        s = str(trade_date) if pd.notnull(trade_date) else ""
         trade_date_str = f"{s[:4]}-{s[4:6]}-{s[6:8]}" if len(s) == 8 else s
 
     # 统计连板梯队数据
