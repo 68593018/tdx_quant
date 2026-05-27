@@ -1601,9 +1601,10 @@
                         const data = await res.json();
                         if (data.status === "success") {
                             projectionData.value = data;
-                            nextTick(() => {
+                            // 使用 setTimeout 延迟 200ms，以防 Vue 网格渲染还未完成重排时 ECharts 初始化读取了错误的 100px 宽度
+                            setTimeout(() => {
                                 initPatternProjectionChart();
-                            });
+                            }, 200);
                         } else {
                             projectionData.value = null;
                         }
@@ -1629,9 +1630,9 @@
                         return;
                     }
 
-                    // 构建 X 轴类目：30 天历史 + 20 天未来
+                    // 构建 X 轴类目：29 天历史 (T-29 到 T-1) + 1 天今日 + 20 天预测 = 50 个轴刻度，与 50 长度对齐序列完美闭合映射！
                     const xCategories = [];
-                    for (let i = 30; i >= 1; i--) {
+                    for (let i = 29; i >= 1; i--) {
                         xCategories.push(`T-${i}`);
                     }
                     xCategories.push("今日 T0");
@@ -1778,6 +1779,13 @@
 
                     chartProjectionInstance.setOption(option, true);
                     chartProjectionInstance.resize();
+                    
+                    // 双重保底，在 50ms 后重新触发 resize，彻底根绝 CSS grid 动画微小延时导致的 100px 宽度异常
+                    setTimeout(() => {
+                        if (chartProjectionInstance) {
+                            chartProjectionInstance.resize();
+                        }
+                    }, 50);
                 };
 
                 const highlightProjectionPath = (id) => {
