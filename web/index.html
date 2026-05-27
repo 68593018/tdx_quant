@@ -737,6 +737,31 @@
                     <div class="chart-box w-full h-[450px]" id="chart-flow-trend"></div>
                 </div>
 
+                <!-- 🌌 四象限星图 & 🗓️ 资金强度热力矩阵 -->
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                    <!-- 左卡片：RRG轮动星图 -->
+                    <div class="glass-card rounded-2xl p-6">
+                        <div class="flex justify-between items-center border-b border-white/5 pb-4 mb-4">
+                            <div class="chart-title text-sm font-semibold flex items-center gap-2" style="border:none; margin:0; padding:0;">
+                                <span>🌌</span> 板块资金“宽度波浪”轮动四象限星图
+                            </div>
+                            <span class="text-[10px] text-cyber-textMuted bg-[#0d1423] border border-cyber-border/40 px-2 py-0.5 rounded-full font-mono">彗星拖尾 (最近5日)</span>
+                        </div>
+                        <div class="chart-box w-full h-[450px]" id="chart-rotation-rrg"></div>
+                    </div>
+
+                    <!-- 右卡片：30日资金强度热力矩阵 -->
+                    <div class="glass-card rounded-2xl p-6">
+                        <div class="flex justify-between items-center border-b border-white/5 pb-4 mb-4">
+                            <div class="chart-title text-sm font-semibold flex items-center gap-2" style="border:none; margin:0; padding:0;">
+                                <span>🗓️</span> 核心板块30日资金强度轮动热力矩阵
+                            </div>
+                            <span class="text-[10px] text-cyber-textMuted bg-[#0d1423] border border-cyber-border/40 px-2 py-0.5 rounded-full font-mono">最近30个交易日</span>
+                        </div>
+                        <div class="chart-box w-full h-[450px]" id="chart-flow-heatmap"></div>
+                    </div>
+                </div>
+
                 <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
                     <!-- 概念板块及行业板块多头宽度表格并列 -->
                     <div class="glass-card rounded-2xl p-6 space-y-4">
@@ -1398,6 +1423,8 @@
                     expandedConcepts.value[name] = !expandedConcepts.value[name];
                 };
                 let chartFlowInstance = null;
+                let chartRrgInstance = null;
+                let chartHeatmapInstance = null;
 
                 // 3. 数据中心 state
                 const syncStatus = ref({ active: false, progress: 0, logs: "" });
@@ -1994,6 +2021,366 @@
                     };
 
                     chartFlowInstance.setOption(option, true);
+                    initRrgCometChart();
+                    initFlowHeatmapChart();
+                };
+
+                const initRrgCometChart = () => {
+                    const dom = document.getElementById("chart-rotation-rrg");
+                    if (!dom) return;
+
+                    if (!chartRrgInstance) {
+                        chartRrgInstance = echarts.init(dom);
+                        window.addEventListener('resize', () => {
+                            if (chartRrgInstance) chartRrgInstance.resize();
+                        });
+                    }
+
+                    const flowData = currentFlowType.value === "industry" ? marketData.value.industry_flow : marketData.value.concept_flow;
+                    if (!flowData || !flowData.dates || flowData.dates.length === 0 || !flowData.series) {
+                        return;
+                    }
+
+                    const dates = flowData.dates;
+                    const metric = currentFlowMetric.value;
+                    const topSectors = flowData.series.filter(item => item.type === "top");
+
+                    if (topSectors.length === 0) return;
+
+                    const latestStrengths = topSectors.map(item => {
+                        const vals = metric === "ratio" ? item.ratio : item.amount;
+                        return vals[vals.length - 1] || 0;
+                    });
+                    const yMedian = latestStrengths.reduce((a, b) => a + b, 0) / latestStrengths.length;
+
+                    const tailDays = 5;
+                    const seriesList = [];
+
+                    topSectors.forEach((item, index) => {
+                        const vals = metric === "ratio" ? item.ratio : item.amount;
+                        const n = vals.length;
+                        if (n < tailDays + 3) return;
+
+                        const dataPoints = [];
+                        for (let i = n - tailDays; i < n; i++) {
+                            const valCurrent = vals[i] || 0;
+                            const valPrev = vals[i - 3] || 0;
+                            const v = valCurrent - valPrev;
+                            const s = valCurrent;
+                            const step = i - (n - tailDays);
+                            const opacity = 0.25 + 0.75 * (step / (tailDays - 1));
+                            const size = 4 + 8 * (step / (tailDays - 1));
+
+                            dataPoints.push({
+                                value: [parseFloat(v.toFixed(3)), parseFloat(s.toFixed(3))],
+                                symbolSize: size,
+                                itemStyle: {
+                                    opacity: opacity,
+                                    shadowBlur: step === tailDays - 1 ? 12 : 0,
+                                    shadowColor: 'inherit'
+                                },
+                                date: dates[i],
+                                sector: item.name,
+                                velocity: v,
+                                strength: s
+                            });
+                        }
+
+                        seriesList.push({
+                            name: item.name,
+                            type: 'line',
+                            data: dataPoints,
+                            smooth: true,
+                            showSymbol: true,
+                            lineStyle: {
+                                width: 2,
+                                opacity: 0.35,
+                                shadowBlur: 2
+                            },
+                            emphasis: {
+                                lineStyle: {
+                                    width: 4,
+                                    opacity: 0.9
+                                }
+                            }
+                        });
+                    });
+
+                    if (seriesList.length > 0) {
+                        seriesList[0].markLine = {
+                            silent: true,
+                            symbol: 'none',
+                            lineStyle: {
+                                type: 'dashed',
+                                color: 'rgba(255, 255, 255, 0.12)',
+                                width: 1
+                            },
+                            data: [
+                                { xAxis: 0 },
+                                { yAxis: yMedian }
+                            ]
+                        };
+                        seriesList[0].markArea = {
+                            silent: true,
+                            data: [
+                                [
+                                    { 
+                                        xAxis: 0, 
+                                        yAxis: yMedian, 
+                                        itemStyle: { color: 'rgba(239, 68, 68, 0.015)' }, 
+                                        label: { 
+                                            show: true, 
+                                            position: ['70%', '10%'], 
+                                            formatter: '🔥 共振主升区\n(Leading)', 
+                                            color: 'rgba(239, 68, 68, 0.55)', 
+                                            fontSize: 10, 
+                                            fontWeight: 'bold',
+                                            lineHeight: 14
+                                        } 
+                                    },
+                                    { xAxis: Number.MAX_VALUE, yAxis: Number.MAX_VALUE }
+                                ],
+                                [
+                                    { 
+                                        xAxis: -Number.MAX_VALUE, 
+                                        yAxis: yMedian, 
+                                        itemStyle: { color: 'rgba(245, 158, 11, 0.015)' }, 
+                                        label: { 
+                                            show: true, 
+                                            position: ['10%', '10%'], 
+                                            formatter: '⚡ 高位分化区\n(Overheated)', 
+                                            color: 'rgba(245, 158, 11, 0.55)', 
+                                            fontSize: 10, 
+                                            fontWeight: 'bold',
+                                            lineHeight: 14
+                                        } 
+                                    },
+                                    { xAxis: 0, yAxis: Number.MAX_VALUE }
+                                ],
+                                [
+                                    { 
+                                        xAxis: -Number.MAX_VALUE, 
+                                        yAxis: 0, 
+                                        itemStyle: { color: 'rgba(59, 130, 246, 0.015)' }, 
+                                        label: { 
+                                            show: true, 
+                                            position: ['10%', '80%'], 
+                                            formatter: '❄️ 退潮分流区\n(Lagging)', 
+                                            color: 'rgba(59, 130, 246, 0.55)', 
+                                            fontSize: 10, 
+                                            fontWeight: 'bold',
+                                            lineHeight: 14
+                                        } 
+                                    },
+                                    { xAxis: 0, yAxis: yMedian }
+                                ],
+                                [
+                                    { 
+                                        xAxis: 0, 
+                                        yAxis: 0, 
+                                        itemStyle: { color: 'rgba(16, 185, 129, 0.015)' }, 
+                                        label: { 
+                                            show: true, 
+                                            position: ['70%', '80%'], 
+                                            formatter: '🌱 潜伏吸筹区\n(Improving)', 
+                                            color: 'rgba(16, 185, 129, 0.55)', 
+                                            fontSize: 10, 
+                                            fontWeight: 'bold',
+                                            lineHeight: 14
+                                        } 
+                                    },
+                                    { xAxis: Number.MAX_VALUE, yAxis: yMedian }
+                                ]
+                            ]
+                        };
+                    }
+
+                    const option = {
+                        backgroundColor: 'transparent',
+                        tooltip: {
+                            trigger: 'item',
+                            backgroundColor: 'rgba(13, 20, 35, 0.95)',
+                            borderColor: 'rgba(255, 255, 255, 0.1)',
+                            textStyle: { color: '#f3f4f6', fontSize: 11 },
+                            formatter: (params) => {
+                                const data = params.data;
+                                if (!data || !data.date) return params.name;
+                                return `
+                                    <div class="p-2 font-sans">
+                                        <div class="font-bold text-cyan-400 border-b border-white/10 pb-1 mb-1" style="font-size:12px;">
+                                            🌌 ${data.sector} (${data.date})
+                                        </div>
+                                        <div class="flex justify-between gap-4 text-[11px] my-1">
+                                            <span class="text-cyber-textMuted">流向速度 (X轴):</span>
+                                            <span class="font-mono text-emerald-400 font-bold">${data.velocity.toFixed(2)}${metric === 'ratio' ? '%' : '亿'}</span>
+                                        </div>
+                                        <div class="flex justify-between gap-4 text-[11px] my-1">
+                                            <span class="text-cyber-textMuted">资金强度 (Y轴):</span>
+                                            <span class="font-mono text-cyan-400 font-bold">${data.strength.toFixed(2)}${metric === 'ratio' ? '%' : '亿'}</span>
+                                        </div>
+                                        <div class="text-[9px] text-cyber-textMuted/60 mt-1.5 border-t border-white/5 pt-1 text-right">
+                                            彗尾轨迹展示最近5个交易日
+                                        </div>
+                                    </div>
+                                `;
+                            }
+                        },
+                        grid: { left: '8%', right: '8%', bottom: '10%', top: '10%', containLabel: true },
+                        xAxis: {
+                            type: 'value',
+                            name: `流向速度 (V_t = R_t - R_{t-3})`,
+                            nameLocation: 'middle',
+                            nameGap: 24,
+                            nameTextStyle: { color: '#9ca3af', fontSize: 10 },
+                            axisLabel: { color: '#9ca3af', fontSize: 9 },
+                            axisLine: { lineStyle: { color: 'rgba(255, 255, 255, 0.08)' } },
+                            splitLine: { show: false }
+                        },
+                        yAxis: {
+                            type: 'value',
+                            name: `资金强度 (S_t = R_t)`,
+                            nameTextStyle: { color: '#9ca3af', fontSize: 10 },
+                            axisLabel: { color: '#9ca3af', fontSize: 9 },
+                            axisLine: { lineStyle: { color: 'rgba(255, 255, 255, 0.08)' } },
+                            splitLine: { show: false }
+                        },
+                        color: [
+                            '#ef4444', '#f97316', '#f59e0b', '#10b981', '#06b6d4', 
+                            '#3b82f6', '#6366f1', '#8b5cf6', '#d946ef', '#ec4899'
+                        ],
+                        series: seriesList
+                    };
+
+                    chartRrgInstance.setOption(option, true);
+                    chartRrgInstance.resize();
+                };
+
+                const initFlowHeatmapChart = () => {
+                    const dom = document.getElementById("chart-flow-heatmap");
+                    if (!dom) return;
+
+                    if (!chartHeatmapInstance) {
+                        chartHeatmapInstance = echarts.init(dom);
+                        window.addEventListener('resize', () => {
+                            if (chartHeatmapInstance) chartHeatmapInstance.resize();
+                        });
+                    }
+
+                    const flowData = currentFlowType.value === "industry" ? marketData.value.industry_flow : marketData.value.concept_flow;
+                    if (!flowData || !flowData.dates || flowData.dates.length === 0 || !flowData.series) {
+                        return;
+                    }
+
+                    const dates = flowData.dates;
+                    const metric = currentFlowMetric.value;
+                    const topSectors = flowData.series.filter(item => item.type === "top");
+
+                    if (topSectors.length === 0) return;
+
+                    const xCategories = dates;
+                    const yCategories = topSectors.map(item => item.name);
+
+                    const heatmapData = [];
+                    topSectors.forEach((item, yIdx) => {
+                        const vals = metric === "ratio" ? item.ratio : item.amount;
+                        vals.forEach((val, xIdx) => {
+                            heatmapData.push([xIdx, yIdx, parseFloat(val.toFixed(2))]);
+                        });
+                    });
+
+                    const values = heatmapData.map(d => d[2]);
+                    let minVal = values.length > 0 ? Math.min(...values) : 0;
+                    let maxVal = values.length > 0 ? Math.max(...values) : 10;
+                    if (minVal === maxVal) {
+                        maxVal = minVal + 1.0;
+                    }
+
+                    const option = {
+                        backgroundColor: 'transparent',
+                        tooltip: {
+                            position: 'top',
+                            backgroundColor: 'rgba(13, 20, 35, 0.95)',
+                            borderColor: 'rgba(255, 255, 255, 0.1)',
+                            textStyle: { color: '#f3f4f6', fontSize: 11 },
+                            formatter: (params) => {
+                                const xVal = xCategories[params.value[0]];
+                                const yVal = yCategories[params.value[1]];
+                                const value = params.value[2];
+                                return `
+                                    <div class="p-2 font-sans">
+                                        <div class="font-bold text-cyan-400 border-b border-white/10 pb-1 mb-1" style="font-size:12px;">
+                                            🗓️ 板块资金强度网格
+                                        </div>
+                                        <div class="flex justify-between gap-4 text-[11px] my-1">
+                                            <span class="text-cyber-textMuted">交易日期:</span>
+                                            <span class="font-mono text-white font-bold">${xVal}</span>
+                                        </div>
+                                        <div class="flex justify-between gap-4 text-[11px] my-1">
+                                            <span class="text-cyber-textMuted">所属板块:</span>
+                                            <span class="font-mono text-cyan-400 font-bold">${yVal}</span>
+                                        </div>
+                                        <div class="flex justify-between gap-4 text-[11px] my-1">
+                                            <span class="text-cyber-textMuted">${metric === 'ratio' ? '交易占比' : '交易金额'}:</span>
+                                            <span class="font-mono text-emerald-400 font-bold">${value.toFixed(2)}${metric === 'ratio' ? '%' : '亿'}</span>
+                                        </div>
+                                    </div>
+                                `;
+                            }
+                        },
+                        grid: { left: '3%', right: '3%', bottom: '15%', top: '8%', containLabel: true },
+                        xAxis: {
+                            type: 'category',
+                            data: xCategories,
+                            axisLabel: { 
+                                color: '#9ca3af', 
+                                fontSize: 9,
+                                formatter: (val) => {
+                                    return val ? val.substring(5) : '';
+                                }
+                            },
+                            axisLine: { lineStyle: { color: 'rgba(255, 255, 255, 0.08)' } },
+                            splitArea: { show: true, areaStyle: { color: ['rgba(255,255,255,0.01)', 'rgba(0,0,0,0)'] } }
+                        },
+                        yAxis: {
+                            type: 'category',
+                            data: yCategories,
+                            axisLabel: { color: '#9ca3af', fontSize: 10, fontWeight: 'bold' },
+                            axisLine: { lineStyle: { color: 'rgba(255, 255, 255, 0.08)' } },
+                            splitArea: { show: true, areaStyle: { color: ['rgba(255,255,255,0.01)', 'rgba(0,0,0,0)'] } }
+                        },
+                        visualMap: {
+                            min: minVal,
+                            max: maxVal,
+                            calculable: true,
+                            orient: 'horizontal',
+                            left: 'center',
+                            bottom: '0%',
+                            inRange: {
+                                color: ['rgba(13, 20, 35, 0.6)', '#083344', '#06b6d4', '#a855f7']
+                            },
+                            textStyle: {
+                                color: '#9ca3af',
+                                fontSize: 9
+                            }
+                        },
+                        series: [{
+                            name: '资金强度',
+                            type: 'heatmap',
+                            data: heatmapData,
+                            label: {
+                                show: false
+                            },
+                            emphasis: {
+                                itemStyle: {
+                                    shadowBlur: 10,
+                                    shadowColor: 'rgba(0, 0, 0, 0.5)'
+                                }
+                            }
+                        }]
+                    };
+
+                    chartHeatmapInstance.setOption(option, true);
+                    chartHeatmapInstance.resize();
                 };
 
                 let chartTurnoverInstance = null;
