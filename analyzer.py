@@ -172,6 +172,317 @@ def load_stock_names(tdx_dir: str) -> dict:
                 print(f"⚠️ 警告: 解析 {path} 失败: {e}")
     return names_map
 
+def fetch_lhb_data(date_str: str, names_map: dict) -> dict:
+    """拉取公开龙虎榜并构建主力资金天团引力抱团星图 (静态离线编译支持)"""
+    from datetime import datetime, timedelta
+    import urllib.request
+    import urllib.error
+    import json
+    
+    # 游资天团映射字典
+    SEATS_MAP = {
+        "东方财富证券股份有限公司拉萨东环路第一证券营业部": "拉萨东环路一",
+        "东方财富证券股份有限公司拉萨东环路第二证券营业部": "拉萨东环路二",
+        "东方财富证券股份有限公司拉萨团结路第一证券营业部": "拉萨团结路一",
+        "东方财富证券股份有限公司拉萨团结路第二证券营业部": "拉萨团结路二",
+        "东方财富证券股份有限公司拉萨金融城南环路证券营业部": "拉萨金融城",
+        "国泰君安证券股份有限公司三亚创意产业园证券营业部": "六一中路",
+        "国泰君安证券股份有限公司浙江分公司": "六一中路",
+        "华鑫证券有限责任公司上海宛平南路证券营业部": "炒股养家",
+        "华鑫证券有限责任公司上海茅台路证券营业部": "炒股养家",
+        "华鑫证券有限责任公司上海分公司": "炒股养家",
+        "中信证券股份有限公司北京总部证券营业部": "北京总部",
+        "中信证券股份有限公司北京分公司": "呼家楼",
+        "中国银河证券股份有限公司北京中关村大街证券营业部": "章盟主",
+        "中国银河证券股份有限公司杭州凤起路证券营业部": "章盟主",
+        "国泰君安证券股份有限公司上海江苏路证券营业部": "章盟主",
+        "中信证券股份有限公司西安朱雀大街证券营业部": "方新侠",
+        "中信证券股份有限公司西安分公司": "方新侠",
+        "国信证券股份有限公司深圳红岭中路证券营业部": "葛老大",
+        "中国银河证券股份有限公司大连证券营业部": "陈小群",
+        "中国银河证券股份有限公司大连黄河路证券营业部": "陈小群",
+        "南京证券股份有限公司南京大钟亭证券营业部": "小鳄鱼",
+        "南京证券股份有限公司南京分公司": "小鳄鱼",
+        "国盛证券有限责任公司宁波桑田路证券营业部": "桑田路",
+        "东莞证券股份有限公司厦门珍珠路证券营业部": "珍珠路"
+    }
+
+    print(f"\n🐉 正在异步拉取/回溯 {date_str} 对应的公开龙虎榜数据...")
+    lhb_data = None
+    resolved_date_str = date_str
+    
+    for i in range(8):
+        try:
+            check_date_dt = datetime.strptime(date_str, "%Y-%m-%d") - timedelta(days=i)
+            check_date = check_date_dt.strftime("%Y-%m-%d")
+        except Exception:
+            check_date = date_str
+            
+        url = f"https://datacenter-web.eastmoney.com/api/data/v1/get?sortColumns=TRADE_DATE&sortTypes=-1&pageSize=1000&pageNo=1&reportName=RPT_BILLBOARD_DAILYDETAILSBUY&columns=ALL&source=WEB&client=WEB&filter=(TRADE_DATE%3D%27{check_date}%27)"
+        try:
+            req = urllib.request.Request(
+                url, 
+                headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+            )
+            with urllib.request.urlopen(req, timeout=3.0) as response:
+                if response.status == 200:
+                    res_json = json.loads(response.read().decode('utf-8'))
+                    if res_json.get("success") and res_json.get("result") is not None:
+                        lhb_data = res_json["result"]["data"]
+                        resolved_date_str = check_date
+                        print(f"✅ 成功获取 {resolved_date_str} 的龙虎榜详情数据 (已回溯第 {i} 天)")
+                        break
+        except Exception as e:
+            continue
+
+    if not lhb_data:
+        print("⚠️ 未拉取到最近的龙虎榜详情数据，生成空数据节点。")
+        return {
+            "status": "error",
+            "message": f"未找到最近的龙虎榜数据，请确认网络连接。",
+            "date": date_str,
+            "nodes": [],
+            "links": [],
+            "stocks_summary": [],
+            "seats_summary": []
+        }
+
+    # 构建网络节点与边
+    stock_totals = {}
+    dept_totals = {}
+    dept_net = {}
+    dept_buy = {}
+    dept_sell = {}
+    
+    for r in lhb_data:
+        code = r.get("SECURITY_CODE")
+        secucode = r.get("SECUCODE", "")
+        dept = r.get("OPERATEDEPT_NAME")
+        buy = float(r.get("BUY") or 0.0)
+        sell = float(r.get("SELL") or 0.0)
+        net = float(r.get("NET") or 0.0)
+        
+        if not code or not dept:
+            continue
+            
+        # 智能翻译个股中文简称
+        symbol = ""
+        if "." in secucode:
+            code_part, exchange = secucode.split(".")
+            symbol = f"{exchange.lower()}{code_part}"
+        else:
+            symbol = f"sz{code}" if code.startswith("0") or code.startswith("3") else f"sh{code}"
+            
+        name = names_map.get(symbol, code)
+        stock_key = f"{code}_{name}"
+        stock_totals[stock_key] = stock_totals.get(stock_key, 0.0) + abs(net)
+        dept_totals[dept] = dept_totals.get(dept, 0.0) + abs(net)
+        dept_net[dept] = dept_net.get(dept, 0.0) + net
+        dept_buy[dept] = dept_buy.get(dept, 0.0) + buy
+        dept_sell[dept] = dept_sell.get(dept, 0.0) + sell
+        
+    # 保留交易活跃的节点（总额大于 500 万，或席位在 SEATS_MAP 中）
+    selected_stocks = {k for k, v in stock_totals.items() if v > 5e6}
+    selected_depts = {k for k, v in dept_totals.items() if (v > 5e6 or k in SEATS_MAP)}
+    
+    nodes = []
+    links = []
+    
+    # 4.1 添加股票节点
+    for k in selected_stocks:
+        code, name = k.split('_')
+        total_val = stock_totals[k]
+        size = int(18 + min(22, total_val / 4e7 * 10)) # 限制尺寸范围在 18 - 40
+        nodes.append({
+            "id": f"stock-{code}",
+            "name": name,
+            "symbol": "diamond",
+            "symbolSize": size,
+            "value": f"成交总额: {total_val/1e8:.2f}亿",
+            "category": 0,
+            "itemStyle": {
+                "color": "#06b6d4",
+                "borderColor": "rgba(6, 182, 212, 0.4)",
+                "borderWidth": 2,
+                "shadowBlur": 10,
+                "shadowColor": "rgba(6, 182, 212, 0.5)"
+            }
+        })
+        
+    # 4.2 添加席位节点
+    for dept in selected_depts:
+        nickname = SEATS_MAP.get(dept)
+        total_val = dept_totals[dept]
+        net_val = dept_net[dept]
+        size = int(12 + min(18, total_val / 3e7 * 8)) # 12 - 30
+        
+        # 席位颜色：著名游资置顶发光紫，其他灰色
+        color = "#a855f7" if nickname else "#64748b"
+        shadow = "rgba(168, 85, 247, 0.5)" if nickname else "rgba(100, 116, 139, 0.3)"
+        
+        nodes.append({
+            "id": f"dept-{dept}",
+            "name": nickname if nickname else dept[:10] + "...",
+            "fullName": dept,
+            "symbol": "circle",
+            "symbolSize": size,
+            "value": f"净买额: {net_val/1e8:.2f}亿 | 买: {dept_buy[dept]/1e8:.2f}亿 | 卖: {dept_sell[dept]/1e8:.2f}亿",
+            "category": 1 if nickname else 2,
+            "itemStyle": {
+                "color": color,
+                "borderColor": color,
+                "borderWidth": 1.5,
+                "shadowBlur": 8 if nickname else 0,
+                "shadowColor": shadow
+            }
+        })
+        
+    # 4.3 构建边
+    added_links = set()
+    for r in lhb_data:
+        code = r.get("SECURITY_CODE")
+        secucode = r.get("SECUCODE", "")
+        dept = r.get("OPERATEDEPT_NAME")
+        buy = float(r.get("BUY") or 0.0)
+        sell = float(r.get("SELL") or 0.0)
+        net = float(r.get("NET") or 0.0)
+        
+        symbol = ""
+        if "." in secucode:
+            code_part, exchange = secucode.split(".")
+            symbol = f"{exchange.lower()}{code_part}"
+        else:
+            symbol = f"sz{code}" if code.startswith("0") or code.startswith("3") else f"sh{code}"
+            
+        name = names_map.get(symbol, code)
+        stock_key = f"{code}_{name}"
+        if stock_key not in selected_stocks or dept not in selected_depts:
+            continue
+            
+        link_key = (dept, code)
+        if link_key in added_links:
+            continue
+        added_links.add(link_key)
+        
+        # 计算线宽：买卖量越大连线越粗
+        width = float(max(1.0, min(5.0, abs(net) / 2e6)))
+        links.append({
+            "source": f"dept-{dept}",
+            "target": f"stock-{code}",
+            "value": f"净买: {net/1e4:.0f}万 (买:{buy/1e4:.0f}万, 卖:{sell/1e4:.0f}万)",
+            "lineStyle": {
+                "width": width,
+                "opacity": 0.4
+            }
+        })
+
+    # 5. 右侧卡片数据聚合
+    # 5.1 本日上榜热门股明细
+    stocks_grouped = {}
+    for r in lhb_data:
+        code = r.get("SECURITY_CODE")
+        secucode = r.get("SECUCODE", "")
+        dept = r.get("OPERATEDEPT_NAME")
+        buy = float(r.get("BUY") or 0.0)
+        sell = float(r.get("SELL") or 0.0)
+        net = float(r.get("NET") or 0.0)
+        reason = r.get("EXPLANATION") or "日常波动上榜"
+        
+        if not code:
+            continue
+            
+        symbol = ""
+        if "." in secucode:
+            code_part, exchange = secucode.split(".")
+            symbol = f"{exchange.lower()}{code_part}"
+        else:
+            symbol = f"sz{code}" if code.startswith("0") or code.startswith("3") else f"sh{code}"
+            
+        name = names_map.get(symbol, code)
+        if code not in stocks_grouped:
+            stocks_grouped[code] = {
+                "code": code,
+                "name": name,
+                "reason": reason,
+                "net_amt": 0.0,
+                "buy_seats": [],
+                "sell_seats": []
+            }
+            
+        stocks_grouped[code]["net_amt"] += net
+        nickname = SEATS_MAP.get(dept, dept[:8] + "...")
+        seat_info = {"name": nickname, "net": round(net / 1e4, 1)}
+        
+        if net > 0:
+            stocks_grouped[code]["buy_seats"].append(seat_info)
+        elif net < 0:
+            stocks_grouped[code]["sell_seats"].append(seat_info)
+            
+    stocks_summary = list(stocks_grouped.values())
+    for s in stocks_summary:
+        s["net_amt"] = round(s["net_amt"] / 1e8, 2)
+        s["buy_seats"] = sorted(s["buy_seats"], key=lambda x: x["net"], reverse=True)[:3]
+        s["sell_seats"] = sorted(s["sell_seats"], key=lambda x: x["net"])[:3]
+    stocks_summary = sorted(stocks_summary, key=lambda x: abs(x["net_amt"]), reverse=True)
+
+    # 5.2 知名游资天团交易风向标
+    seats_grouped = {}
+    for r in lhb_data:
+        code = r.get("SECURITY_CODE")
+        secucode = r.get("SECUCODE", "")
+        dept = r.get("OPERATEDEPT_NAME")
+        buy = float(r.get("BUY") or 0.0)
+        sell = float(r.get("SELL") or 0.0)
+        net = float(r.get("NET") or 0.0)
+        
+        nickname = SEATS_MAP.get(dept)
+        if not nickname:
+            continue
+            
+        if nickname not in seats_grouped:
+            seats_grouped[nickname] = {
+                "nickname": nickname,
+                "fullname": dept,
+                "buy": 0.0,
+                "sell": 0.0,
+                "net": 0.0,
+                "targets": {}
+            }
+            
+        sg = seats_grouped[nickname]
+        sg["buy"] += buy
+        sg["sell"] += sell
+        sg["net"] += net
+        
+        symbol = ""
+        if "." in secucode:
+            code_part, exchange = secucode.split(".")
+            symbol = f"{exchange.lower()}{code_part}"
+        else:
+            symbol = f"sz{code}" if code.startswith("0") or code.startswith("3") else f"sh{code}"
+            
+        name = names_map.get(symbol, code)
+        sg["targets"][name] = sg["targets"].get(name, 0.0) + net
+        
+    seats_summary = list(seats_grouped.values())
+    for s in seats_summary:
+        s["buy"] = round(s["buy"] / 1e8, 2)
+        s["sell"] = round(s["sell"] / 1e8, 2)
+        s["net"] = round(s["net"] / 1e8, 2)
+        sorted_targets = sorted(s["targets"].items(), key=lambda x: abs(x[1]), reverse=True)[:3]
+        s["targets"] = [{"name": t[0], "net": round(t[1] / 1e4, 1)} for t in sorted_targets]
+        
+    seats_summary = sorted(seats_summary, key=lambda x: abs(x["net"]), reverse=True)
+
+    return {
+        "status": "success",
+        "date": resolved_date_str,
+        "nodes": nodes,
+        "links": links,
+        "stocks_summary": stocks_summary,
+        "seats_summary": seats_summary
+    }
+
 def main():
     t_start = time.perf_counter()
     
@@ -401,6 +712,9 @@ def main():
     industry_flow_processed = process_flow_data(df_ind_flow, 'industry_name')
     concept_flow_processed = process_flow_data(df_concept_flow, 'block_name')
 
+    # 拉取并注入龙虎榜主力资金星图数据 (支持离线双击直开)
+    lhb_data_dict = fetch_lhb_data(trade_date_str, names_map)
+
     # 整理全套数据字典用于前端注入
     full_data = {
         "trade_date": trade_date_str,
@@ -416,7 +730,8 @@ def main():
         "industry_breadth": ind_breadth_list,
         "support": support_list,
         "industry_flow": industry_flow_processed,
-        "concept_flow": concept_flow_processed
+        "concept_flow": concept_flow_processed,
+        "lhb": lhb_data_dict
     }
 
     t_calc = time.perf_counter()

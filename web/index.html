@@ -120,6 +120,9 @@
                 <button @click="switchTab('archive')" :class="['px-5 py-2 rounded-lg text-xs font-semibold tracking-wider flex items-center gap-2 transition-all', activeTab === 'archive' ? 'bg-cyber-primary/10 border border-cyber-primary/20 text-cyber-primary' : 'text-cyber-textMuted hover:text-white']">
                     📄 报告归档
                 </button>
+                <button @click="switchTab('broker_radar')" :class="['px-5 py-2 rounded-lg text-xs font-semibold tracking-wider flex items-center gap-2 transition-all', activeTab === 'broker_radar' ? 'bg-cyber-primary/10 border border-cyber-primary/20 text-cyber-primary' : 'text-cyber-textMuted hover:text-white']">
+                    🐉 游资雷达
+                </button>
             </nav>
 
             <div class="flex items-center gap-4 text-xs font-mono">
@@ -1426,6 +1429,123 @@
                 </div>
             </div>
 
+            <!-- ======================= 🐉 TAB 6: 游资雷达 ======================= -->
+            <div v-show="activeTab === 'broker_radar'" class="space-y-8 relative min-h-[500px]">
+                <!-- 离线锁定效果遮罩 -->
+                <div v-if="isOffline && !lhbData" class="absolute inset-0 bg-[#06090f]/75 backdrop-blur-md flex flex-col items-center justify-center text-center p-8 space-y-4 z-10 rounded-2xl">
+                    <div class="text-3xl animate-bounce">🔒</div>
+                    <h4 class="font-outfit font-bold text-base text-white">游资抱团星图已锁定</h4>
+                    <p class="text-xs text-cyber-textMuted max-w-md leading-relaxed">
+                        龙虎榜主力游资天团分析与资金抱团图谱需要实时网络连接或后台大盘情绪编译器支持。请启动本地 <code>python server.py</code> 服务器，或运行 <code>python analyzer.py</code> 编译离线看板！
+                    </p>
+                </div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-5 gap-8">
+                    <!-- 左侧：ECharts 资金抱团引力拓扑网格 (3/5 宽度) -->
+                    <div class="glass-card rounded-2xl p-6 lg:col-span-3 space-y-4">
+                        <div class="text-xs font-bold border-b border-white/5 pb-2.5 flex items-center justify-between">
+                            <span class="flex items-center gap-1.5 text-cyber-primary">
+                                <span>🐉</span> 龙虎榜主力资金“天团席位”抱团引力图谱
+                            </span>
+                            <span v-if="lhbData" class="text-[10px] text-cyber-textMuted font-mono bg-[#0d1423] border border-cyber-border/40 px-2 py-0.5 rounded-full">
+                                📅 龙虎数据基准日: {{ lhbData.date }}
+                            </span>
+                        </div>
+                        <div id="chart-lhb-network" class="w-full h-[550px]"></div>
+                    </div>
+
+                    <!-- 右侧：活跃游资与个股买卖明细 (2/5 宽度) -->
+                    <div class="lg:col-span-2 space-y-8">
+                        <!-- 1. 知名游资天团交易风向标 -->
+                        <div class="glass-card rounded-2xl p-6 space-y-4">
+                            <div class="text-xs font-bold border-b border-white/5 pb-2.5 text-cyber-accent flex items-center gap-1.5">
+                                <span>🔥</span> 今日知名游资天团成交风向标 (TOP 活跃)
+                            </div>
+                            <div class="overflow-x-auto max-h-[250px] overflow-y-auto pr-1">
+                                <table class="w-full text-left text-xs border-collapse">
+                                    <thead>
+                                        <tr class="border-b border-white/5 text-[10px] text-cyber-textMuted font-mono">
+                                            <th class="py-2 px-1 font-semibold">游资天团</th>
+                                            <th class="py-2 px-1 font-semibold text-right">买入额</th>
+                                            <th class="py-2 px-1 font-semibold text-right">卖出额</th>
+                                            <th class="py-2 px-1 font-semibold text-right">净买额</th>
+                                            <th class="py-2 px-1 font-semibold">主要攻击方向</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="font-mono text-[11px]">
+                                        <tr v-for="seat in lhbData?.seats_summary" :key="seat.nickname" class="border-b border-white/2 hover:bg-white/3 transition-all">
+                                            <td class="py-2.5 px-1 font-sans font-bold text-white">{{ seat.nickname }}</td>
+                                            <td class="py-2.5 px-1 text-right text-cyber-up">{{ seat.buy.toFixed(2) }}亿</td>
+                                            <td class="py-2.5 px-1 text-right text-cyber-down">{{ seat.sell.toFixed(2) }}亿</td>
+                                            <td :class="['py-2.5 px-1 text-right font-bold', seat.net >= 0 ? 'text-cyber-up' : 'text-cyber-down']">
+                                                {{ seat.net >= 0 ? '+' : '' }}{{ seat.net.toFixed(2) }}亿
+                                            </td>
+                                            <td class="py-2.5 px-1 font-sans text-cyber-textMuted">
+                                                <div class="flex flex-wrap gap-1">
+                                                    <span v-for="t in seat.targets" :key="t.name" class="bg-white/5 px-1.5 py-0.5 rounded text-[9px]" :title="'买卖净额: ' + t.net + '万'">
+                                                        {{ t.name }}
+                                                    </span>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                        <tr v-if="!lhbData?.seats_summary || lhbData.seats_summary.length === 0">
+                                            <td colspan="5" class="text-center py-8 text-cyber-textMuted">暂无今日知名游资交易流水</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <!-- 2. 本日上榜热门股明细 -->
+                        <div class="glass-card rounded-2xl p-6 space-y-4">
+                            <div class="text-xs font-bold border-b border-white/5 pb-2.5 text-cyber-primary flex items-center gap-1.5">
+                                <span>📈</span> 本日龙虎榜热门上榜股资金拆解
+                            </div>
+                            <div class="overflow-x-auto max-h-[250px] overflow-y-auto pr-1">
+                                <table class="w-full text-left text-xs border-collapse">
+                                    <thead>
+                                        <tr class="border-b border-white/5 text-[10px] text-cyber-textMuted font-mono">
+                                            <th class="py-2 px-1 font-semibold">股票名称</th>
+                                            <th class="py-2 px-1 font-semibold text-right">LHB净买</th>
+                                            <th class="py-2 px-1 font-semibold">主买营业部</th>
+                                            <th class="py-2 px-1 font-semibold">主卖营业部</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="text-[11px]">
+                                        <tr v-for="stk in lhbData?.stocks_summary" :key="stk.code" class="border-b border-white/2 hover:bg-white/3 transition-all">
+                                            <td class="py-2.5 px-1 font-sans">
+                                                <span class="font-bold text-white">{{ stk.name }}</span>
+                                                <span class="font-mono text-[9px] text-cyber-textMuted block">{{ stk.code }}</span>
+                                            </td>
+                                            <td :class="['py-2.5 px-1 text-right font-mono font-bold', stk.net_amt >= 0 ? 'text-cyber-up' : 'text-cyber-down']">
+                                                {{ stk.net_amt >= 0 ? '+' : '' }}{{ stk.net_amt.toFixed(2) }}亿
+                                            </td>
+                                            <td class="py-2.5 px-1 text-cyber-textMuted">
+                                                <div class="flex flex-col gap-0.5 text-[9px] font-sans">
+                                                    <span v-for="b in stk.buy_seats.slice(0, 2)" :key="b.name" class="text-cyber-up truncate" :title="b.name">
+                                                        ● {{ b.name }} (+{{ b.net }}万)
+                                                    </span>
+                                                </div>
+                                            </td>
+                                            <td class="py-2.5 px-1 text-cyber-textMuted">
+                                                <div class="flex flex-col gap-0.5 text-[9px] font-sans">
+                                                    <span v-for="s in stk.sell_seats.slice(0, 2)" :key="s.name" class="text-cyber-down truncate" :title="s.name">
+                                                        ● {{ s.name }} ({{ s.net }}万)
+                                                    </span>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                        <tr v-if="!lhbData?.stocks_summary || lhbData.stocks_summary.length === 0">
+                                            <td colspan="4" class="text-center py-8 text-cyber-textMuted">暂无今日龙虎榜股票明细</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
         </main>
     </div>
 
@@ -1538,6 +1658,10 @@
                 const projectionData = ref(null);
                 const activeProjectionId = ref(null);
                 let chartProjectionInstance = null;
+
+                // 6. 游资雷达 state
+                const lhbData = ref(null);
+                let chartLhbInstance = null;
 
                 const getSuggestionClass = (color) => {
                     switch (color) {
@@ -2222,6 +2346,13 @@
                     } else if (tab === 'backtest') {
                         nextTick(() => {
                             initBacktestChart();
+                        });
+                    } else if (tab === 'broker_radar') {
+                        nextTick(async () => {
+                            if (!lhbData.value) {
+                                await loadLhbData();
+                            }
+                            initLhbNetworkChart();
                         });
                     }
                 };
@@ -3110,6 +3241,138 @@
                     }
                 };
 
+                // 8. 游资雷达数据加载与图谱绘制
+                const loadLhbData = async () => {
+                    if (isOffline.value) {
+                        if (MARKET_DATA_INJECTED && MARKET_DATA_INJECTED.lhb) {
+                            lhbData.value = MARKET_DATA_INJECTED.lhb;
+                        }
+                        return;
+                    }
+                    try {
+                        const res = await fetch("/api/market/lhb");
+                        const data = await res.json();
+                        if (data.status === "success") {
+                            lhbData.value = data;
+                        } else {
+                            if (MARKET_DATA_INJECTED && MARKET_DATA_INJECTED.lhb) {
+                                lhbData.value = MARKET_DATA_INJECTED.lhb;
+                            }
+                        }
+                    } catch (e) {
+                        console.error("加载龙虎榜数据失败", e);
+                        if (MARKET_DATA_INJECTED && MARKET_DATA_INJECTED.lhb) {
+                            lhbData.value = MARKET_DATA_INJECTED.lhb;
+                        }
+                    }
+                };
+
+                const initLhbNetworkChart = () => {
+                    const dom = document.getElementById("chart-lhb-network");
+                    if (!dom) return;
+
+                    if (!chartLhbInstance) {
+                        chartLhbInstance = echarts.init(dom);
+                        window.addEventListener('resize', () => {
+                            if (chartLhbInstance) chartLhbInstance.resize();
+                        });
+                    }
+
+                    if (!lhbData.value || !lhbData.value.nodes || lhbData.value.nodes.length === 0) {
+                        return;
+                    }
+
+                    const option = {
+                        backgroundColor: 'transparent',
+                        tooltip: {
+                            trigger: 'item',
+                            formatter: (params) => {
+                                if (params.dataType === 'node') {
+                                    const node = params.data;
+                                    if (node.category === 0) {
+                                        return `<div class="p-2.5 font-sans leading-relaxed text-xs">
+                                            <span class="text-cyber-primary font-bold text-sm">📈 ${node.name}</span><br/>
+                                            <span class="text-cyber-textMuted">${node.value}</span>
+                                        </div>`;
+                                    } else if (node.category === 1) {
+                                        return `<div class="p-2.5 font-sans leading-relaxed text-xs">
+                                            <span class="text-cyber-accent font-bold text-sm">🔥 游资天团: ${node.name}</span><br/>
+                                            <span class="text-[#c084fc] font-semibold">${node.fullName}</span><br/>
+                                            <span class="text-cyber-textMuted">${node.value}</span>
+                                        </div>`;
+                                    } else {
+                                        return `<div class="p-2.5 font-sans leading-relaxed text-xs">
+                                            <span class="text-cyber-textMuted font-bold text-sm">🏢 ${node.name}</span><br/>
+                                            <span class="text-cyber-textMuted/70 font-mono text-[10px] block">${node.fullName}</span>
+                                            <span class="text-cyber-textMuted/90">${node.value}</span>
+                                        </div>`;
+                                    }
+                                } else if (params.dataType === 'edge') {
+                                    const link = params.data;
+                                    return `<div class="p-2 font-sans text-xs">
+                                        <span class="text-white font-semibold">🔗 资金合力连结</span><br/>
+                                        <span class="text-cyber-textMuted">${link.value}</span>
+                                    </div>`;
+                                }
+                                return '';
+                            },
+                            backgroundColor: 'rgba(13, 20, 35, 0.95)',
+                            borderColor: 'rgba(255, 255, 255, 0.12)',
+                            textStyle: { color: '#f3f4f6' }
+                        },
+                        legend: [{
+                            data: ['个股标的', '知名游资天团', '活跃席位营业部'],
+                            textStyle: { color: '#9ca3af', fontSize: 10 },
+                            bottom: 0
+                        }],
+                        series: [{
+                            name: '龙虎榜资金抱团星图',
+                            type: 'graph',
+                            layout: 'force',
+                            data: lhbData.value.nodes,
+                            links: lhbData.value.links,
+                            categories: [
+                                { name: '个股标的' },
+                                { name: '知名游资天团' },
+                                { name: '活跃席位营业部' }
+                            ],
+                            roam: true,
+                            label: {
+                                show: true,
+                                position: 'right',
+                                formatter: '{b}',
+                                color: '#e5e7eb',
+                                fontSize: 10,
+                                fontFamily: 'sans-serif'
+                            },
+                            force: {
+                                repulsion: 180,
+                                gravity: 0.08,
+                                edgeLength: [40, 120],
+                                layoutAnimation: true
+                            },
+                            lineStyle: {
+                                color: 'source',
+                                curveness: 0.1
+                            },
+                            emphasis: {
+                                focus: 'adjacency',
+                                lineStyle: {
+                                    width: 6,
+                                    opacity: 0.8
+                                },
+                                label: {
+                                    show: true,
+                                    fontSize: 12,
+                                    fontWeight: 'bold'
+                                }
+                            }
+                        }]
+                    };
+
+                    chartLhbInstance.setOption(option);
+                };
+
                 onMounted(async () => {
                     await loadMarketData();
                     await loadStrategiesList();
@@ -3117,6 +3380,8 @@
                     if (!isOffline.value) {
                         runStockAnalysis(stockSearchSymbol.value);
                     }
+                    // Eagerly load LHB data so it's ready when switching tabs
+                    loadLhbData();
                     nextTick(() => {
                         initTurnoverChart();
                     });
@@ -3200,7 +3465,12 @@
                     backtestError,
                     stockStrategies,
                     runBacktest,
-                    initBacktestChart
+                    initBacktestChart,
+
+                    // 游资雷达
+                    lhbData,
+                    loadLhbData,
+                    initLhbNetworkChart
                 };
             }
         }).mount("#app");
