@@ -146,10 +146,32 @@ def load_stock_names(tdx_dir: str) -> dict:
 
 _STOCK_NAMES_CACHE = []
 
+LEVEL2_CHAR_MAP = {
+    '钼': 'm', '锂': 'l', '钴': 'g', '镍': 'n', '钛': 't', '钒': 'f',
+    '铬': 'g', '锰': 'm', '锆': 'g', '铌': 'n', '镧': 'l', '铈': 's',
+    '钕': 'n', '镝': 'd', '铽': 't', '钇': 'y', '铼': 'l', '镓': 'g',
+    '锗': 'z', '砷': 's', '硒': 'x', '碲': 'd', '硼': 'p', '氟': 'f',
+    '氯': 'l', '氦': 'h', '氖': 'n', '氩': 'y', '氪': 'k', '氙': 'x',
+    '氡': 'd', '晟': 's', '璟': 'j', '翀': 'c', '烜': 'x', '骅': 'h',
+    '璨': 'c', '激活': 'j', '斐': 'f', '昱': 'y', '昊': 'h', '皓': 'h',
+    '睿': 'r', '喆': 'z', '堃': 'k', '煊': 'x', '翚': 'h', '炀': 'y'
+}
+
+def clean_stock_name(name: str) -> str:
+    """去除 XD/XR/DR 等除权除息前缀"""
+    upper_name = name.upper()
+    if upper_name.startswith("XD") or upper_name.startswith("XR") or upper_name.startswith("DR"):
+        return name[2:]
+    return name
+
 def get_pinyin_initials(name: str) -> str:
     """获取中文名称的拼音首字母"""
+    name = clean_stock_name(name)
     initials = []
     for char in name:
+        if char in LEVEL2_CHAR_MAP:
+            initials.append(LEVEL2_CHAR_MAP[char])
+            continue
         if 'a' <= char.lower() <= 'z' or '0' <= char <= '9':
             initials.append(char.lower())
             continue
@@ -445,6 +467,9 @@ def search_stocks(q: str = ""):
         elif q in s["name"].lower():
             match = True
         elif s["initials"].startswith(q) or (s["initials_alt"] and s["initials_alt"].startswith(q)):
+            match = True
+        elif (len(s["initials"]) >= 3 and q.startswith(s["initials"]) and len(q) - len(s["initials"]) <= 1) or \
+             (s["initials_alt"] and len(s["initials_alt"]) >= 3 and q.startswith(s["initials_alt"]) and len(q) - len(s["initials_alt"]) <= 1):
             match = True
             
         if match:
