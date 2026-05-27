@@ -1165,6 +1165,95 @@
                         </div>
                     </div>
                 </div>
+
+                <!-- 🤖 历史走势相似度匹对与未来概率投影 (DTW) -->
+                <div v-if="stockAnalysisData" class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                    <!-- 左侧：ECharts 复合投影走势图 (2/3 宽度) -->
+                    <div class="glass-card rounded-2xl p-6 lg:col-span-2 space-y-4">
+                        <div class="text-xs font-bold border-b border-white/5 pb-2.5 flex items-center justify-between">
+                            <span class="flex items-center gap-1.5 text-cyber-primary">
+                                <span>🤖</span> 历史 K 线走势相似度匹配与未来 20 日概率投影 (DTW)
+                            </span>
+                            <span class="text-[10px] text-cyber-textMuted font-mono">白粗线：当前30日 | 彩线：最相似历史片段及未来20日投影</span>
+                        </div>
+                        <div id="chart-pattern-projection" class="w-full h-[380px]"></div>
+                    </div>
+
+                    <!-- 右侧：概率雷达统计面板 (1/3 宽度) -->
+                    <div class="glass-card rounded-2xl p-6 space-y-5 flex flex-col justify-between">
+                        <div>
+                            <div class="text-xs font-bold border-b border-white/5 pb-2.5 text-cyber-accent flex items-center gap-1.5 mb-4">
+                                <span>🔮</span> 走势相似度多样本推演雷达
+                            </div>
+
+                            <!-- 上涨胜率圆形指示看板 -->
+                            <div class="flex items-center gap-6 bg-white/3 border border-white/5 p-4 rounded-xl relative overflow-hidden">
+                                <div class="w-16 h-16 rounded-full flex flex-col items-center justify-center border-4" 
+                                     :style="{ borderColor: projectionData?.win_rate >= 50 ? 'rgba(16, 185, 129, 0.4)' : 'rgba(239, 68, 68, 0.4)' }">
+                                    <span class="font-mono text-lg font-bold text-white">{{ projectionData?.win_rate || 50 }}%</span>
+                                    <span class="text-[7px] text-cyber-textMuted -mt-1">胜率</span>
+                                </div>
+                                <div class="space-y-1">
+                                    <div class="text-xs font-bold text-white">未来 20 日上涨概率</div>
+                                    <p class="text-[10px] text-cyber-textMuted leading-relaxed">
+                                        基于 DTW 形态匹配，在 5 段最相似的历史走势样本中，有 <b>{{ Math.round((projectionData?.win_rate || 50) * 5 / 100) }}</b> 个样本在后 20 天实现了上涨。
+                                    </p>
+                                </div>
+                            </div>
+
+                            <!-- 收益期望指标 -->
+                            <div class="grid grid-cols-3 gap-2 mt-4 text-center">
+                                <div class="bg-white/3 border border-white/5 rounded-lg py-2.5">
+                                    <div class="text-[8px] text-cyber-textMuted mb-0.5">期望收益</div>
+                                    <div :class="['font-mono font-bold text-xs', (projectionData?.expected_return || 0) >= 0 ? 'text-cyber-up' : 'text-cyber-down']">
+                                        {{ (projectionData?.expected_return || 0) >= 0 ? '+' : '' }}{{ projectionData?.expected_return || 0 }}%
+                                    </div>
+                                </div>
+                                <div class="bg-white/3 border border-white/5 rounded-lg py-2.5">
+                                    <div class="text-[8px] text-cyber-textMuted mb-0.5">最大涨幅</div>
+                                    <div class="font-mono font-bold text-xs text-cyber-up">
+                                        +{{ projectionData?.max_gain || 0 }}%
+                                    </div>
+                                </div>
+                                <div class="bg-white/3 border border-white/5 rounded-lg py-2.5">
+                                    <div class="text-[8px] text-cyber-textMuted mb-0.5">最大下行</div>
+                                    <div class="font-mono font-bold text-xs text-cyber-down">
+                                        {{ projectionData?.max_loss || 0 }}%
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- 相似走势列表 -->
+                            <div class="mt-4 space-y-2">
+                                <div class="text-[10px] font-bold text-cyber-textMuted uppercase tracking-wider mb-2">Top 5 最相似走势匹配</div>
+                                <div class="space-y-1.5 max-h-[160px] overflow-y-auto pr-1">
+                                    <div v-for="match in projectionData?.matches" 
+                                         :key="match.id"
+                                         @mouseenter="highlightProjectionPath(match.id)"
+                                         @mouseleave="resetProjectionPaths"
+                                         :class="['flex items-center justify-between p-2 rounded-lg border text-[10px] transition-all cursor-pointer select-none bg-white/2 hover:bg-cyber-primary/10 border-white/5 hover:border-cyber-primary/30', activeProjectionId === match.id ? 'bg-cyber-primary/15 border-cyber-primary/40' : '']">
+                                        <div class="flex items-center gap-1.5">
+                                            <span class="font-bold font-mono text-cyber-primary">#{{ match.id }}</span>
+                                            <span class="font-semibold text-white">{{ match.source }}</span>
+                                            <span class="text-cyber-textMuted">({{ match.start_date.substring(0, 7) }})</span>
+                                        </div>
+                                        <div class="flex items-center gap-2">
+                                            <span class="text-cyber-accent font-bold">相似 {{ match.similarity }}%</span>
+                                            <span :class="['font-mono font-bold', match.sample_return >= 0 ? 'text-cyber-up' : 'text-cyber-down']">
+                                                {{ match.sample_return >= 0 ? '+' : '' }}{{ match.sample_return }}%
+                                            </span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="text-[8px] text-cyber-textMuted border-t border-white/5 pt-2 flex items-center justify-between">
+                            <span>* 鼠标悬浮于匹配行，可瞬间在左图中高亮其路径</span>
+                            <span>算法: DTW (Sakoe-Chiba)</span>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <!-- ======================= 💾 TAB 4: 数据中心 ======================= -->
@@ -1446,6 +1535,9 @@
                 const stockAnalysisLoading = ref(false);
                 const stockAnalysisError = ref("");
                 let stockChartInstance = null;
+                const projectionData = ref(null);
+                const activeProjectionId = ref(null);
+                let chartProjectionInstance = null;
 
                 const getSuggestionClass = (color) => {
                     switch (color) {
@@ -1486,6 +1578,7 @@
                             stockSearchSymbol.value = data.symbol;
                             nextTick(() => {
                                 initStockPriceChart();
+                                runStockPatternMatch(data.symbol);
                             });
                         } else {
                             throw new Error(data.message || "特征数据解析异常");
@@ -1496,6 +1589,259 @@
                     } finally {
                         stockAnalysisLoading.value = false;
                     }
+                };
+
+                const runStockPatternMatch = async (symbol) => {
+                    try {
+                        const res = await fetch(`/api/stock/pattern_match?symbol=${encodeURIComponent(symbol)}`);
+                        if (!res.ok) {
+                            projectionData.value = null;
+                            return;
+                        }
+                        const data = await res.json();
+                        if (data.status === "success") {
+                            projectionData.value = data;
+                            nextTick(() => {
+                                initPatternProjectionChart();
+                            });
+                        } else {
+                            projectionData.value = null;
+                        }
+                    } catch (e) {
+                        console.error("加载走势相似度匹配失败", e);
+                        projectionData.value = null;
+                    }
+                };
+
+                const initPatternProjectionChart = () => {
+                    const dom = document.getElementById("chart-pattern-projection");
+                    if (!dom) return;
+
+                    if (!chartProjectionInstance) {
+                        chartProjectionInstance = echarts.init(dom);
+                        window.addEventListener('resize', () => {
+                            if (chartProjectionInstance) chartProjectionInstance.resize();
+                        });
+                    }
+
+                    const data = projectionData.value;
+                    if (!data || !data.target || !data.matches || data.matches.length === 0) {
+                        return;
+                    }
+
+                    // 构建 X 轴类目：30 天历史 + 20 天未来
+                    const xCategories = [];
+                    for (let i = 30; i >= 1; i--) {
+                        xCategories.push(`T-${i}`);
+                    }
+                    xCategories.push("今日 T0");
+                    for (let i = 1; i <= 20; i++) {
+                        xCategories.push(`T+${i}`);
+                    }
+
+                    // 1. 目标价格数据序列 (Length 50, 后面 20 天为 null)
+                    const targetSeriesData = [...data.target.prices];
+                    while (targetSeriesData.length < 50) {
+                        targetSeriesData.push(null);
+                    }
+
+                    const colors = ['#ef4444', '#f59e0b', '#10b981', '#06b6d4', '#8b5cf6'];
+                    const seriesList = [];
+
+                    // 添加目标本股序列 (粗白线，置于顶层)
+                    seriesList.push({
+                        name: data.name,
+                        type: 'line',
+                        data: targetSeriesData,
+                        smooth: true,
+                        showSymbol: false,
+                        lineStyle: {
+                            color: '#ffffff',
+                            width: 3.5,
+                            shadowBlur: 10,
+                            shadowColor: 'rgba(255, 255, 255, 0.4)'
+                        },
+                        z: 10
+                    });
+
+                    // 为每个匹配走势添加两条序列：历史实线、未来虚线
+                    data.matches.forEach((match, idx) => {
+                        const color = colors[idx % colors.length];
+                        
+                        // 历史实线 (0 - 29)
+                        const histData = match.aligned_prices.slice(0, 30);
+                        while (histData.length < 50) {
+                            histData.push(null);
+                        }
+                        
+                        // 未来虚线 (29 - 49)
+                        const projData = Array(29).fill(null).concat(match.aligned_prices.slice(29, 50));
+
+                        seriesList.push({
+                            name: `${match.source} (历史)`,
+                            id: `hist-${match.id}`,
+                            type: 'line',
+                            data: histData,
+                            smooth: true,
+                            showSymbol: false,
+                            lineStyle: {
+                                color: color,
+                                width: 1.5,
+                                opacity: 0.35
+                            }
+                        });
+
+                        seriesList.push({
+                            name: `${match.source} (投影)`,
+                            id: `proj-${match.id}`,
+                            type: 'line',
+                            data: projData,
+                            smooth: true,
+                            showSymbol: false,
+                            lineStyle: {
+                                color: color,
+                                width: 1.5,
+                                type: 'dashed',
+                                opacity: 0.35
+                            }
+                        });
+                    });
+
+                    const option = {
+                        backgroundColor: 'transparent',
+                        tooltip: {
+                            trigger: 'axis',
+                            backgroundColor: 'rgba(13, 20, 35, 0.95)',
+                            borderColor: 'rgba(255, 255, 255, 0.1)',
+                            textStyle: { color: '#f3f4f6', fontSize: 11 },
+                            formatter: (params) => {
+                                let html = `<div class="p-1 font-sans">
+                                    <div class="font-bold text-cyan-400 border-b border-white/10 pb-1 mb-1.5" style="font-size:11px;">
+                                        🧭 对齐走势投影 (${params[0].axisValue})
+                                    </div>`;
+                                
+                                params.forEach(p => {
+                                    if (p.value === null || p.value === undefined) return;
+                                    
+                                    if (p.seriesIndex === 0) {
+                                        html += `
+                                            <div class="flex justify-between gap-4 text-[10px] my-1">
+                                                <span class="text-white font-bold">✨ ${p.seriesName} (当前价格):</span>
+                                                <span class="font-mono text-white font-bold">${parseFloat(p.value).toFixed(2)} 元</span>
+                                            </div>
+                                        `;
+                                    } else {
+                                        const seriesId = p.seriesId || '';
+                                        const matchId = parseInt(seriesId.split('-')[1]);
+                                        const matchItem = data.matches.find(m => m.id === matchId);
+                                        if (matchItem) {
+                                            const isProj = seriesId.startsWith('proj');
+                                            const dataIdx = p.dataIndex;
+                                            const origDate = matchItem.dates[dataIdx] || '未知';
+                                            
+                                            html += `
+                                                <div class="flex justify-between gap-4 text-[10px] my-1">
+                                                    <span style="color:${p.color}">● ${matchItem.source} (${origDate}${isProj ? ' 预测' : ''}):</span>
+                                                    <span class="font-mono font-semibold" style="color:${p.color}">${parseFloat(p.value).toFixed(2)} 元</span>
+                                                </div>
+                                            `;
+                                        }
+                                    }
+                                });
+                                
+                                html += `</div>`;
+                                return html;
+                            }
+                        },
+                        grid: { left: '4%', right: '4%', bottom: '8%', top: '8%', containLabel: true },
+                        xAxis: {
+                            type: 'category',
+                            boundaryGap: false,
+                            data: xCategories,
+                            axisLabel: { color: '#9ca3af', fontSize: 9 },
+                            axisLine: { lineStyle: { color: 'rgba(255, 255, 255, 0.08)' } },
+                            splitLine: { 
+                                show: true, 
+                                lineStyle: { color: 'rgba(255, 255, 255, 0.03)' }
+                            }
+                        },
+                        yAxis: {
+                            type: 'value',
+                            name: "对齐股价 (元)",
+                            nameTextStyle: { color: '#9ca3af', fontSize: 9 },
+                            axisLabel: { color: '#9ca3af', fontSize: 9, formatter: '{value} 元' },
+                            axisLine: { lineStyle: { color: 'rgba(255, 255, 255, 0.08)' } },
+                            splitLine: { lineStyle: { color: 'rgba(255, 255, 255, 0.03)' } }
+                        },
+                        series: seriesList
+                    };
+
+                    chartProjectionInstance.setOption(option, true);
+                    chartProjectionInstance.resize();
+                };
+
+                const highlightProjectionPath = (id) => {
+                    activeProjectionId.value = id;
+                    updateProjectionChartHighlight(id);
+                };
+
+                const resetProjectionPaths = () => {
+                    activeProjectionId.value = null;
+                    updateProjectionChartHighlight(null);
+                };
+
+                const updateProjectionChartHighlight = (targetId) => {
+                    if (!chartProjectionInstance || !projectionData.value) return;
+                    
+                    const data = projectionData.value;
+                    const colors = ['#ef4444', '#f59e0b', '#10b981', '#06b6d4', '#8b5cf6'];
+                    const seriesUpdate = [];
+                    
+                    seriesUpdate.push({
+                        lineStyle: {
+                            color: '#ffffff',
+                            width: 3.5,
+                            opacity: 1.0,
+                            shadowBlur: 10,
+                            shadowColor: 'rgba(255, 255, 255, 0.4)'
+                        }
+                    });
+                    
+                    data.matches.forEach((match, idx) => {
+                        const color = colors[idx % colors.length];
+                        const isTarget = targetId === match.id;
+                        
+                        let opacityValue = 0.35;
+                        let lineWidth = 1.5;
+                        
+                        if (targetId !== null) {
+                            opacityValue = isTarget ? 0.95 : 0.08;
+                            lineWidth = isTarget ? 3.5 : 1.0;
+                        }
+                        
+                        seriesUpdate.push({
+                            id: `hist-${match.id}`,
+                            lineStyle: {
+                                color: color,
+                                width: lineWidth,
+                                opacity: opacityValue
+                            }
+                        });
+                        
+                        seriesUpdate.push({
+                            id: `proj-${match.id}`,
+                            lineStyle: {
+                                color: color,
+                                width: lineWidth,
+                                type: 'dashed',
+                                opacity: opacityValue
+                            }
+                        });
+                    });
+                    
+                    chartProjectionInstance.setOption({
+                        series: seriesUpdate
+                    });
                 };
 
                 const onSearchInput = async () => {
@@ -2834,6 +3180,10 @@
                     formatLargeNumber,
                     runStockAnalysis,
                     initStockPriceChart,
+                    projectionData,
+                    activeProjectionId,
+                    highlightProjectionPath,
+                    resetProjectionPaths,
 
                     // 组合回测
                     backtestParams,

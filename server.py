@@ -1820,6 +1820,271 @@ def analyze_single_stock(symbol: str):
     }
 
 # -------------------------------------------------------------
+# 7.5. DTW 走势匹配与未来概率投影 API (GET)
+# -------------------------------------------------------------
+@app.get("/api/stock/pattern_match", summary="基于 DTW 算法匹配最相似的历史K线形态并投影未来走势")
+def get_stock_pattern_match(symbol: str, window_size: int = 30, predict_size: int = 20):
+    if not symbol or len(symbol.strip()) == 0:
+        return JSONResponse(status_code=400, content={"status": "error", "message": "股票代码不能为空！"})
+        
+    symbol = symbol.strip().lower()
+    tdx_dir = load_tdx_dir()
+    names_map = load_stock_names(tdx_dir)
+    
+    # 自动解析股票代码
+    resolved_symbol = None
+    if re.match(r'^\d{6}$', symbol):
+        code_only = symbol
+        symbol_full = [s for s in names_map.keys() if s.endswith(code_only)]
+        if symbol_full:
+            resolved_symbol = symbol_full[0]
+        else:
+            files = os.listdir(DATA_STORE_DIR)
+            matched_files = [f for f in files if f.endswith('.parquet') and f.startswith(('sh', 'sz', 'bj')) and f[2:8] == code_only]
+            if matched_files:
+                resolved_symbol = matched_files[0].replace('.parquet', '')
+            else:
+                if code_only.startswith(('60', '68')):
+                    resolved_symbol = f"sh{code_only}"
+                elif code_only.startswith(('00', '30')):
+                    resolved_symbol = f"sz{code_only}"
+                else:
+                    resolved_symbol = f"bj{code_only}"
+    else:
+        resolved_symbol = symbol
+        
+    pq_path = os.path.join(DATA_STORE_DIR, f"{resolved_symbol}.parquet")
+    if not os.path.exists(pq_path):
+        return JSONResponse(status_code=404, content={"status": "error", "message": f"未找到该股票数据！"})
+        
+    import numpy as np
+    
+    # 定义带 Sakoe-Chiba 窗约束的 DTW 距离计算函数
+    def dtw_distance(s1, s2, w=4):
+        l1, l2 = len(s1), len(s2)
+        w = max(w, abs(l1 - l2))
+        dp = np.full((l1 + 1, l2 + 1), np.inf)
+        dp[0, 0] = 0.0
+        
+        for i in range(1, l1 + 1):
+            for j in range(max(1, i - w), min(l2 + 1, i + w + 1)):
+                cost = abs(s1[i-1] - s2[j-1])
+                dp[i, j] = cost + min(dp[i-1, j], dp[i, j-1], dp[i-1, j-1])
+        return dp[l1, l2]
+
+    con = duckdb.connect()
+    
+    # 1. 加载目标股票最近 window_size 日价格
+    try:
+        sql_target = f"""
+        SELECT date, close_adj
+        FROM read_parquet('{pq_path}')
+        WHERE close_adj IS NOT NULL AND volume > 0
+        ORDER BY date DESC
+        LIMIT {window_size}
+        """
+        df_target = con.execute(sql_target).fetchdf()
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"status": "error", "message": f"加载目标股票数据失败: {e}"})
+        
+    if len(df_target) < window_size:
+        return JSONResponse(status_code=400, content={"status": "error", "message": f"数据样本过少（当前仅有{len(df_target)}天），无法进行走势匹配！"})
+        
+    # 转为按时间升序
+    df_target = df_target.iloc[::-1].reset_index(drop=True)
+    target_dates = [d.strftime('%Y-%m-%d') if hasattr(d, 'strftime') else str(d)[:10] for d in df_target['date']]
+    target_prices = df_target['close_adj'].astype(float).tolist()
+    
+    # 归一化 Target
+    min_t, max_t = min(target_prices), max(target_prices)
+    range_t = max_t - min_t if max_t > min_t else 1.0
+    target_norm = [(p - min_t) / range_t for p in target_prices]
+    
+    stock_name = names_map.get(resolved_symbol, "本股")
+    
+    # 2. 加载检索走势池
+    # 2.1 加载本股所有历史走势
+    try:
+        sql_history = f"""
+        SELECT date, close_adj
+        FROM read_parquet('{pq_path}')
+        WHERE close_adj IS NOT NULL AND volume > 0
+        ORDER BY date ASC
+        """
+        df_history = con.execute(sql_history).fetchdf()
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"status": "error", "message": f"加载本股历史走势失败: {e}"})
+        
+    # 2.2 加载上证指数历史走势作为形态匹配对照池
+    df_sh_history = pd.DataFrame()
+    sh_pq_path = os.path.join(DATA_STORE_DIR, "sh000001.parquet")
+    if os.path.exists(sh_pq_path) and resolved_symbol != "sh000001":
+        try:
+            sql_sh = f"""
+            SELECT date, close_adj
+            FROM read_parquet('{sh_pq_path}')
+            WHERE close_adj IS NOT NULL AND volume > 0
+            ORDER BY date ASC
+            """
+            df_sh_history = con.execute(sql_sh).fetchdf()
+        except Exception:
+            pass
+            
+    # 3. 提取所有可能的滑动窗口
+    windows = []
+    window_meta = []
+    
+    # 提取本股历史窗口
+    h_prices = df_history['close_adj'].astype(float).to_numpy()
+    h_dates = df_history['date'].tolist()
+    N = len(h_prices)
+    
+    # 避开最近 window_size + predict_size + 10 天，防止匹配到当前走势本身
+    for i in range(N - window_size - predict_size - 10):
+        w_prices = h_prices[i : i + window_size]
+        min_w, max_w = w_prices.min(), w_prices.max()
+        range_w = max_w - min_w if max_w > min_w else 1.0
+        w_norm = (w_prices - min_w) / range_w
+        windows.append(w_norm)
+        window_meta.append({
+            "source": stock_name,
+            "prices": w_prices.tolist(),
+            "future_prices": h_prices[i + window_size : i + window_size + predict_size].tolist(),
+            "dates": [d.strftime('%Y-%m-%d') if hasattr(d, 'strftime') else str(d)[:10] for d in h_dates[i : i + window_size]],
+            "future_dates": [d.strftime('%Y-%m-%d') if hasattr(d, 'strftime') else str(d)[:10] for d in h_dates[i + window_size : i + window_size + predict_size]],
+            "start_idx": i
+        })
+        
+    # 提取上证指数窗口
+    if not df_sh_history.empty:
+        sh_prices = df_sh_history['close_adj'].astype(float).to_numpy()
+        sh_dates = df_sh_history['date'].tolist()
+        N_sh = len(sh_prices)
+        for i in range(N_sh - window_size - predict_size - 10):
+            w_prices = sh_prices[i : i + window_size]
+            min_w, max_w = w_prices.min(), w_prices.max()
+            range_w = max_w - min_w if max_w > min_w else 1.0
+            w_norm = (w_prices - min_w) / range_w
+            windows.append(w_norm)
+            window_meta.append({
+                "source": "上证指数",
+                "prices": w_prices.tolist(),
+                "future_prices": sh_prices[i + window_size : i + window_size + predict_size].tolist(),
+                "dates": [d.strftime('%Y-%m-%d') if hasattr(d, 'strftime') else str(d)[:10] for d in sh_dates[i : i + window_size]],
+                "future_dates": [d.strftime('%Y-%m-%d') if hasattr(d, 'strftime') else str(d)[:10] for d in sh_dates[i + window_size : i + window_size + predict_size]],
+                "start_idx": i
+            })
+            
+    if len(windows) == 0:
+        return JSONResponse(status_code=400, content={"status": "error", "message": "未找到可用于匹配的历史数据区间！"})
+        
+    # 4. 向量化计算欧氏距离进行极速粗筛
+    windows_arr = np.array(windows)
+    target_norm_arr = np.array(target_norm)
+    diffs = windows_arr - target_norm_arr
+    l2_dists = np.sqrt(np.mean(diffs**2, axis=1))
+    
+    # 粗筛出 L2 距离最小的前 150 个候选窗口，进入 DTW 精细计算
+    candidate_indices = np.argsort(l2_dists)[:150]
+    
+    candidates = []
+    for idx in candidate_indices:
+        w_norm = windows[idx]
+        dtw_dist = dtw_distance(target_norm, w_norm, w=4)
+        candidates.append({
+            "meta": window_meta[idx],
+            "dtw_dist": dtw_dist,
+            "l2_dist": float(l2_dists[idx])
+        })
+        
+    # 根据精细 DTW 距离排序
+    candidates.sort(key=lambda x: x['dtw_dist'])
+    
+    # 5. 30 日非重叠去重逻辑过滤
+    top_matches = []
+    selected_intervals = []
+    for cand in candidates:
+        meta = cand['meta']
+        src = meta['source']
+        s_idx = meta['start_idx']
+        e_idx = s_idx + window_size + predict_size
+        
+        # 检查是否重叠超过 10 天
+        overlap = False
+        for sel_src, sel_s, sel_e in selected_intervals:
+            if sel_src == src:
+                ol = max(0, min(e_idx, sel_e) - max(s_idx, sel_s))
+                if ol > 10:
+                    overlap = True
+                    break
+        if not overlap:
+            selected_intervals.append((src, s_idx, e_idx))
+            top_matches.append(cand)
+            if len(top_matches) >= 5:
+                break
+                
+    # 6. 对齐 Top 5 走势，计算胜率及未来统计投影
+    aligned_matches = []
+    target_start_price = target_prices[0]
+    
+    for idx, match in enumerate(top_matches):
+        meta = match['meta']
+        # 合并匹配区间 30 天与未来投影区间 20 天
+        h_prices = meta['prices'] + meta['future_prices']
+        h_dates = meta['dates'] + meta['future_dates']
+        
+        # 按照 Target 起始价的相对变动进行对齐缩放
+        base_h = h_prices[0] if h_prices[0] > 0 else 1.0
+        aligned_prices = [round(target_start_price * (p / base_h), 2) for p in h_prices]
+        
+        # 计算该样本后 20 天最终涨跌幅
+        start_future_p = h_prices[window_size - 1]
+        end_future_p = h_prices[-1]
+        sample_return = round(((end_future_p - start_future_p) / start_future_p) * 100, 2) if start_future_p > 0 else 0.0
+        
+        # 将 DTW 距离转换成一个直观的相似度百分比得分
+        similarity = round(max(50.0, min(99.5, 100.0 * (1 - match['dtw_dist'] / (window_size * 0.15)))), 1)
+        
+        aligned_matches.append({
+            "id": idx + 1,
+            "source": meta['source'],
+            "start_date": meta['dates'][0],
+            "end_date": meta['dates'][-1],
+            "similarity": similarity,
+            "sample_return": sample_return,
+            "aligned_prices": aligned_prices,
+            "dates": h_dates
+        })
+        
+    # 计算胜率及收益统计
+    win_rate = 50.0
+    avg_return = 0.0
+    max_gain = 0.0
+    max_loss = 0.0
+    
+    if aligned_matches:
+        win_count = sum(1 for m in aligned_matches if m['sample_return'] > 0)
+        win_rate = round(win_count * 100.0 / len(aligned_matches), 1)
+        avg_return = round(sum(m['sample_return'] for m in aligned_matches) / len(aligned_matches), 2)
+        max_gain = round(max(m['sample_return'] for m in aligned_matches), 2)
+        max_loss = round(min(m['sample_return'] for m in aligned_matches), 2)
+        
+    return {
+        "status": "success",
+        "symbol": resolved_symbol,
+        "name": stock_name,
+        "win_rate": win_rate,
+        "expected_return": avg_return,
+        "max_gain": max_gain,
+        "max_loss": max_loss,
+        "target": {
+            "dates": target_dates,
+            "prices": target_prices
+        },
+        "matches": aligned_matches
+    }
+
+# -------------------------------------------------------------
 # 8. 报告归档列表与 Markdown 内容渲染 APIs (GET)
 # -------------------------------------------------------------
 REPORT_DIR = os.path.join(CURRENT_DIR, "report")
