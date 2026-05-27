@@ -860,11 +860,14 @@
                             </div>
                             
                             <!-- 搜索框 -->
-                            <div class="mt-4 flex gap-2">
+                            <div class="mt-4 flex gap-2 relative">
                                 <input type="text" 
                                        v-model="stockSearchSymbol" 
+                                       @input="onSearchInput"
+                                       @focus="onSearchInput"
+                                       @blur="hideSuggestionsWithDelay"
                                        @keyup.enter="runStockAnalysis(stockSearchSymbol)"
-                                       placeholder="输入代码或简拼，如 600000 或 sh600000" 
+                                       placeholder="输入代码或拼音首字母，如 pfyh 或 600000" 
                                        class="flex-1 bg-cyber-base/80 border border-cyber-border rounded-xl px-4 py-2 text-xs focus:outline-none focus:border-cyber-primary transition-all font-mono">
                                 <button @click="runStockAnalysis(stockSearchSymbol)" 
                                         :disabled="stockAnalysisLoading"
@@ -872,6 +875,21 @@
                                     <span v-if="stockAnalysisLoading">分析中...</span>
                                     <span v-else>开始量化</span>
                                 </button>
+                                
+                                <!-- 🎯 智能联想推荐浮层 -->
+                                <div v-if="showSuggestions && suggestedStocks.length > 0" 
+                                     class="absolute top-full left-0 right-0 mt-1.5 glass-card rounded-xl border border-cyber-primary/20 bg-[#0d1423] shadow-2xl z-50 max-h-56 overflow-y-auto divide-y divide-white/5">
+                                    <div v-for="stk in suggestedStocks" 
+                                         :key="stk.symbol"
+                                         @click="selectStockSuggestion(stk)"
+                                         class="px-4 py-2.5 flex items-center justify-between text-xs cursor-pointer hover:bg-cyber-primary/10 transition-all select-none">
+                                        <div class="flex items-center gap-2">
+                                            <span class="font-mono font-bold text-cyber-primary">{{ stk.symbol }}</span>
+                                            <span class="font-semibold text-white">{{ stk.name }}</span>
+                                        </div>
+                                        <span class="text-[10px] text-cyber-textMuted uppercase font-mono bg-white/5 px-1.5 py-0.5 rounded">{{ stk.pinyin }}</span>
+                                    </div>
+                                </div>
                             </div>
                             
                             <div v-if="stockAnalysisError" class="mt-3 text-xs text-cyber-up">
@@ -1395,6 +1413,8 @@
 
                 // 5. 个股分析 state
                 const stockSearchSymbol = ref("600000");
+                const suggestedStocks = ref([]);
+                const showSuggestions = ref(false);
                 const stockAnalysisData = ref(null);
                 const stockAnalysisLoading = ref(false);
                 const stockAnalysisError = ref("");
@@ -1449,6 +1469,41 @@
                     } finally {
                         stockAnalysisLoading.value = false;
                     }
+                };
+
+                const onSearchInput = async () => {
+                    const q = stockSearchSymbol.value.trim();
+                    if (!q || isOffline.value) {
+                        suggestedStocks.value = [];
+                        showSuggestions.value = false;
+                        return;
+                    }
+                    try {
+                        const response = await fetch(`/api/stocks/search?q=${encodeURIComponent(q)}`);
+                        const data = await response.json();
+                        if (data.status === 'success') {
+                            suggestedStocks.value = data.results;
+                            showSuggestions.value = data.results.length > 0;
+                        } else {
+                            suggestedStocks.value = [];
+                            showSuggestions.value = false;
+                        }
+                    } catch (e) {
+                        suggestedStocks.value = [];
+                        showSuggestions.value = false;
+                    }
+                };
+
+                const selectStockSuggestion = (stk) => {
+                    stockSearchSymbol.value = stk.symbol;
+                    showSuggestions.value = false;
+                    runStockAnalysis(stk.symbol);
+                };
+
+                const hideSuggestionsWithDelay = () => {
+                    setTimeout(() => {
+                        showSuggestions.value = false;
+                    }, 200);
                 };
 
                 const initStockPriceChart = () => {
@@ -2380,6 +2435,11 @@
 
                     // 个股分析
                     stockSearchSymbol,
+                    suggestedStocks,
+                    showSuggestions,
+                    onSearchInput,
+                    selectStockSuggestion,
+                    hideSuggestionsWithDelay,
                     stockAnalysisData,
                     stockAnalysisLoading,
                     stockAnalysisError,

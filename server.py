@@ -144,6 +144,81 @@ def load_stock_names(tdx_dir: str) -> dict:
                 print(f"⚠️ 警告: 解析 {path} 失败: {e}")
     return names_map
 
+_STOCK_NAMES_CACHE = []
+
+def get_pinyin_initials(name: str) -> str:
+    """获取中文名称的拼音首字母"""
+    initials = []
+    for char in name:
+        if 'a' <= char.lower() <= 'z' or '0' <= char <= '9':
+            initials.append(char.lower())
+            continue
+        try:
+            gbk_bytes = char.encode('gbk')
+        except Exception:
+            continue
+        if len(gbk_bytes) != 2:
+            continue
+        code = (gbk_bytes[0] << 8) + gbk_bytes[1]
+        
+        if 0xB0A1 <= code <= 0xB0C4: initials.append('a')
+        elif 0xB0C5 <= code <= 0xB2C0: initials.append('b')
+        elif 0xB2C1 <= code <= 0xB4ED: initials.append('c')
+        elif 0xB4EE <= code <= 0xB6E9: initials.append('d')
+        elif 0xB6EA <= code <= 0xB7A1: initials.append('e')
+        elif 0xB7A2 <= code <= 0xB8C0: initials.append('f')
+        elif 0xB8C1 <= code <= 0xB9FD: initials.append('g')
+        elif 0xB9FE <= code <= 0xBBF6: initials.append('h')
+        elif 0xBBF7 <= code <= 0xBFA5: initials.append('j')
+        elif 0xBFA6 <= code <= 0xC0AB: initials.append('k')
+        elif 0xC0AC <= code <= 0xC2E7: initials.append('l')
+        elif 0xC2E8 <= code <= 0xC4C2: initials.append('m')
+        elif 0xC4C3 <= code <= 0xC5B5: initials.append('n')
+        elif 0xC5B6 <= code <= 0xC5BD: initials.append('o')
+        elif 0xC5BE <= code <= 0xC6D9: initials.append('p')
+        elif 0xC6DA <= code <= 0xC8BA: initials.append('q')
+        elif 0xC8BB <= code <= 0xC8F5: initials.append('r')
+        elif 0xC8F6 <= code <= 0xCBF9: initials.append('s')
+        elif 0xCBFA <= code <= 0xCDD9: initials.append('t')
+        elif 0xCDDA <= code <= 0xCEF3: initials.append('w')
+        elif 0xCEF4 <= code <= 0xD1B8: initials.append('x')
+        elif 0xD1B9 <= code <= 0xD4D0: initials.append('y')
+        elif 0xD4D1 <= code <= 0xF7FE: initials.append('z')
+    return "".join(initials)
+
+def get_stock_names_with_initials():
+    global _STOCK_NAMES_CACHE
+    if _STOCK_NAMES_CACHE:
+        return _STOCK_NAMES_CACHE
+    
+    tdx_dir = load_tdx_dir()
+    names_map = load_stock_names(tdx_dir)
+    
+    cache = []
+    for sym, name in names_map.items():
+        initials = get_pinyin_initials(name)
+        initials_alt = None
+        
+        # 多音字特判优化
+        if "行" in name:
+            initials_alt = initials.replace('x', 'h')
+        elif "重" in name:
+            initials_alt = initials.replace('z', 'c')
+        elif "长" in name:
+            initials_alt = initials.replace('z', 'c')
+        elif "厦" in name:
+            initials_alt = initials.replace('s', 'x')
+            
+        cache.append({
+            "symbol": sym,
+            "code": sym[2:],
+            "name": name,
+            "initials": initials,
+            "initials_alt": initials_alt
+        })
+    _STOCK_NAMES_CACHE = cache
+    return cache
+
 def load_strategies() -> dict:
     """动态载入 strategies.json 并自动做 Windows 路径正则兼容"""
     if not os.path.exists(STRATEGIES_PATH):
@@ -350,6 +425,42 @@ ANALYTICAL_STRATEGY_KEYS = {
     "limit_up_streaks", "industry_breadth", "industry_flow_30d", 
     "concept_flow_30d"
 }
+
+@app.get("/api/stocks/search", summary="股票名称/代码/拼音首字母智能联想推荐")
+def search_stocks(q: str = ""):
+    q = q.strip().lower()
+    if not q:
+        return JSONResponse(content={"status": "success", "results": []})
+        
+    try:
+        stocks = get_stock_names_with_initials()
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"status": "error", "message": f"加载股票列表失败: {e}"})
+        
+    results = []
+    for s in stocks:
+        match = False
+        if s["code"].startswith(q) or s["symbol"].startswith(q):
+            match = True
+        elif q in s["name"].lower():
+            match = True
+        elif s["initials"].startswith(q) or (s["initials_alt"] and s["initials_alt"].startswith(q)):
+            match = True
+            
+        if match:
+            results.append({
+                "symbol": s["symbol"].upper(),
+                "name": s["name"],
+                "pinyin": s["initials"]
+            })
+            if len(results) >= 15:
+                break
+                
+    return JSONResponse(content={
+        "status": "success",
+        "count": len(results),
+        "results": results
+    })
 
 @app.get("/api/strategies", summary="列出所有可用的选股及分析策略")
 def get_all_strategies():
