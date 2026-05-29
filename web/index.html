@@ -1697,8 +1697,9 @@
                                     <div class="space-y-2">
                                         <label class="text-cyber-textMuted block text-[10px]">放量分析滚动周期</label>
                                         <select v-model="abVolumeParams.lookback_months" class="w-full bg-[#0b111e] border border-white/10 rounded-xl px-3 py-1.5 text-white focus:outline-none focus:border-cyber-primary/50 text-[11px]">
-                                            <option :value="12">过去 12 个月 (默认)</option>
-                                            <option :value="24">过去 24 个月</option>
+                                            <option v-for="m in 13" :key="11 + m" :value="11 + m">
+                                                过去 {{ 11 + m }} 个月{{ 11 + m === 12 ? ' (默认)' : '' }}
+                                            </option>
                                         </select>
                                     </div>
 
