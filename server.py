@@ -4,7 +4,7 @@ import json
 import time
 import re
 import threading
-from datetime import datetime
+from datetime import datetime, timedelta
 import subprocess
 
 # -------------------------------------------------------------
@@ -2909,6 +2909,679 @@ def calculate_metrics(equity_history, trades_log, initial_cash):
         "win_rate": round(win_rate, 2),
         "profit_loss_ratio": round(profit_loss_ratio, 2)
     }
+
+# -------------------------------------------------------------
+# 8.6 月级异常放量+首板策略专属参数化回测 API (POST)
+# -------------------------------------------------------------
+class MonthlyAbnormalVolumeRequest(BaseModel):
+    start_date: str = "2010-01-01"
+    end_date: str = "2010-12-31"
+    vol_ratio_threshold: float = 3.0
+    lookback_months: int = 12
+    abnormal_months_threshold: int = 2
+    listing_days_threshold: int = 390
+    capital: float = 100000.0
+    enable_market_filter: bool = False
+    market_filter_index: str = "sh000852"
+    market_filter_ma: int = 250
+    market_filter_rule: str = "above"
+    market_filter_preset: str = "resonance"
+    market_filter_slope_rule: str = "up"
+    market_filter_position_rule: str = "above"
+    market_filter_slope_days: int = 5
+    enable_stop_loss: bool = False
+    stop_loss_pct: float = 10.0
+    enable_vol_position_filter: bool = False
+    vol_position_multiplier: float = 1.3
+    hist_price_lower_mult: float = 0.7
+    enable_stock_trend_confirm: bool = False
+    confirm_ma30_daily_slope_pos: bool = False
+    confirm_above_ma30_daily: bool = False
+    confirm_above_ma30_weekly: bool = False
+    confirm_above_ma30_monthly: bool = False
+
+@app.post("/api/strategy/monthly_abnormal_volume/run", summary="月级异常放量首次涨停低吸策略参数化一键式回测")
+def run_monthly_abnormal_volume_backtest(req: MonthlyAbnormalVolumeRequest):
+    t_start = time.perf_counter()
+    
+    # Check data path
+    if not os.path.exists(DATA_STORE_DIR):
+        return JSONResponse(status_code=500, content={"status": "error", "message": "数据目录不存在"})
+        
+    # Load market regime index filter
+    index_regime = {}
+    index_name_cn = "未知指数"
+    index_name_map = {
+        "sh000852": "中证1000",
+        "sh000300": "沪深300",
+        "sh000001": "上证指数",
+        "sz399001": "深证成指",
+        "sz399006": "创业板指",
+        "sh000016": "上证50",
+        "sh000010": "上证180"
+    }
+    index_name_cn = index_name_map.get(req.market_filter_index, req.market_filter_index)
+
+    # Determine rules based on preset or custom settings
+    preset = req.market_filter_preset
+    if preset == "resonance":
+        slope_rule = "up"
+        pos_rule = "above"
+    elif preset == "pullback":
+        slope_rule = "up"
+        pos_rule = "below"
+    elif preset == "reversal":
+        slope_rule = "down"
+        pos_rule = "below"
+    else: # custom
+        slope_rule = req.market_filter_slope_rule
+        pos_rule = req.market_filter_position_rule
+    
+    slope_days = req.market_filter_slope_days
+    if slope_days < 1:
+        slope_days = 5
+
+    # Human-readable rule description for response statistics
+    rule_desc_map = {
+        "resonance": f"强趋势共振 (均线上行 & 指数 > MA{req.market_filter_ma})",
+        "pullback": f"牛市黄金回踩 (均线上行 & 指数 < MA{req.market_filter_ma})",
+        "reversal": f"逆势超跌反弹 (均线下行 & 指数 < MA{req.market_filter_ma})",
+        "custom": f"自定义 (斜率:{slope_rule}, 位置:{pos_rule}, 周期:{slope_days}天)"
+    }
+    rule_desc = rule_desc_map.get(preset, req.market_filter_rule)
+
+    if req.enable_market_filter:
+        index_file = os.path.join(DATA_STORE_DIR, f"{req.market_filter_index}.parquet")
+        if os.path.exists(index_file):
+            try:
+                index_df = pd.read_parquet(index_file)
+                index_df['date'] = pd.to_datetime(index_df['date'])
+                index_df.sort_values(by='date', inplace=True)
+                index_df.reset_index(drop=True, inplace=True)
+                
+                # Rolling MA on index close
+                index_df['ma'] = index_df['close'].rolling(window=req.market_filter_ma).mean()
+                
+                # Rolling MA prev to compute slope
+                index_df['ma_prev'] = index_df['ma'].shift(slope_days)
+                index_df['slope'] = index_df['ma'] - index_df['ma_prev']
+                
+                for _, row in index_df.iterrows():
+                    d_str = row['date'].strftime('%Y-%m-%d')
+                    close_val = row['close']
+                    ma_val = row['ma']
+                    slope_val = row['slope']
+                    
+                    if pd.isna(ma_val) or pd.isna(slope_val):
+                        index_regime[d_str] = True
+                    else:
+                        # 1. Slope rule check
+                        slope_ok = True
+                        if slope_rule == "up":
+                            slope_ok = bool(slope_val > 0.0)
+                        elif slope_rule == "down":
+                            slope_ok = bool(slope_val < 0.0)
+                            
+                        # 2. Position rule check
+                        pos_ok = True
+                        if pos_rule == "above":
+                            pos_ok = bool(close_val > ma_val)
+                        elif pos_rule == "below":
+                            pos_ok = bool(close_val < ma_val)
+                            
+                        index_regime[d_str] = bool(slope_ok and pos_ok)
+            except Exception as ex:
+                print(f"Error building index filter: {ex}")
+        
+    prefixes = ['sh', 'sz']
+    existing_files = os.listdir(DATA_STORE_DIR)
+    patterns = []
+    for prefix in prefixes:
+        if any(f.startswith(prefix) and f.endswith('.parquet') for f in existing_files):
+            patterns.append(os.path.join(DATA_STORE_DIR, f"{prefix}*.parquet").replace('\\', '/'))
+    patterns_str = ", ".join(f"'{p}'" for p in patterns)
+    
+    if not patterns:
+        return JSONResponse(status_code=500, content={"status": "error", "message": "未找到Parquet行情文件"})
+        
+    con = duckdb.connect()
+    con.execute(f"SET threads = {os.cpu_count()}")
+    
+    # Format dates
+    start_date = req.start_date
+    end_date = req.end_date
+    
+    # 1. DuckDB Query scanning signals for the target year
+    query = f"""
+    WITH raw_daily AS (
+        SELECT 
+            regexp_extract(filename, '([^/\\\\\\\\]+)[.]parquet$', 1) AS symbol,
+            date,
+            close,
+            low,
+            high,
+            amount,
+            volume,
+            close_adj,
+            low_adj,
+            high_adj,
+            factor,
+            MIN(date) OVER (PARTITION BY regexp_extract(filename, '([^/\\\\\\\\]+)[.]parquet$', 1)) AS first_date
+        FROM read_parquet([{patterns_str}], filename=true)
+        WHERE (
+            filename LIKE '%sh60%' 
+            OR filename LIKE '%sh68%' 
+            OR filename LIKE '%sz00%' 
+            OR filename LIKE '%sz30%'
+        )
+    ),
+    daily_returns AS (
+        SELECT 
+            symbol,
+            date,
+            close,
+            low,
+            high,
+            amount,
+            volume,
+            close_adj,
+            low_adj,
+            high_adj,
+            factor,
+            first_date,
+            LAG(close) OVER (PARTITION BY symbol ORDER BY date) AS prev_close,
+            (close - LAG(close) OVER (PARTITION BY symbol ORDER BY date)) / NULLIF(LAG(close) OVER (PARTITION BY symbol ORDER BY date), 0) * 100 AS daily_return
+        FROM raw_daily
+    ),
+    limit_ups AS (
+        SELECT 
+            *,
+            CASE 
+                WHEN (symbol LIKE 'sh60%' OR symbol LIKE 'sz00%') AND daily_return >= 9.91 THEN 1
+                WHEN (symbol LIKE 'sh68%' OR symbol LIKE 'sz30%') AND daily_return >= 19.91 THEN 1
+                ELSE 0
+            END AS is_limit_up
+        FROM daily_returns
+    ),
+    monthly_amount AS (
+        SELECT 
+            symbol,
+            date_trunc('month', date) AS month_date,
+            SUM(amount) AS m_amount,
+            MAX(high_adj) AS m_high_adj,
+            MIN(low_adj) AS m_low_adj
+        FROM raw_daily
+        GROUP BY symbol, month_date
+    ),
+    monthly_ratio AS (
+        SELECT 
+            symbol,
+            month_date,
+            m_amount,
+            m_high_adj,
+            m_low_adj,
+            LAG(m_amount) OVER (PARTITION BY symbol ORDER BY month_date) AS prev_amount,
+            m_amount / NULLIF(LAG(m_amount) OVER (PARTITION BY symbol ORDER BY month_date), 0) AS vol_ratio
+        FROM monthly_amount
+    ),
+    monthly_volume_flag AS (
+        SELECT 
+            symbol,
+            month_date,
+            SUM(CASE WHEN vol_ratio >= {req.vol_ratio_threshold} THEN 1 ELSE 0 END) OVER (
+                PARTITION BY symbol 
+                ORDER BY month_date 
+                ROWS BETWEEN {req.lookback_months} PRECEDING AND 1 PRECEDING
+            ) AS abnormal_months_count,
+            MAX(m_high_adj) OVER (
+                PARTITION BY symbol
+                ORDER BY month_date
+                ROWS BETWEEN {req.lookback_months} PRECEDING AND 1 PRECEDING
+            ) AS hist_max_high_adj,
+            MIN(m_low_adj) OVER (
+                PARTITION BY symbol
+                ORDER BY month_date
+                ROWS BETWEEN {req.lookback_months} PRECEDING AND 1 PRECEDING
+            ) AS hist_min_low_adj
+        FROM monthly_ratio
+    ),
+    limit_up_ranked AS (
+        SELECT 
+            *,
+            ROW_NUMBER() OVER (PARTITION BY symbol, date_trunc('month', date) ORDER BY date) AS limit_up_rank
+        FROM limit_ups
+        WHERE is_limit_up = 1
+    )
+    SELECT 
+        l.symbol,
+        l.date,
+        l.close,
+        l.close_adj,
+        l.low,
+        l.low_adj,
+        l.high,
+        l.high_adj,
+        l.factor,
+        l.limit_up_rank,
+        f.abnormal_months_count,
+        f.hist_max_high_adj,
+        f.hist_min_low_adj
+    FROM limit_up_ranked l
+    JOIN monthly_volume_flag f 
+      ON l.symbol = f.symbol 
+     AND date_trunc('month', l.date) = f.month_date
+    WHERE f.abnormal_months_count >= {req.abnormal_months_threshold}
+      AND l.date - l.first_date >= INTERVAL {req.listing_days_threshold} DAY
+      AND l.limit_up_rank IN (1, 2)
+      AND l.date >= '{start_date}'
+      AND l.date <= '{end_date}'
+    ORDER BY l.date ASC, l.symbol ASC
+    """
+    try:
+        signals_df = con.execute(query).fetchdf()
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"status": "error", "message": f"行情因子数据库查询失败: {e}"})
+        
+    # Apply historical price range filter if enabled
+    if req.enable_vol_position_filter and not signals_df.empty:
+        # Keep signals where:
+        # 1. Historical max high in the lookback window is <= current daily close * Upper Multiplier (default 1.3)
+        # 2. Historical min low in the lookback window is >= current daily close * Lower Multiplier (default 0.7)
+        # 0.0 means invalid fallback, which we allow for safety
+        valid_mask = (signals_df['hist_max_high_adj'] == 0.0) | \
+                     ((signals_df['hist_max_high_adj'] <= signals_df['close_adj'] * req.vol_position_multiplier) & \
+                      (signals_df['hist_min_low_adj'] >= signals_df['close_adj'] * req.hist_price_lower_mult))
+        signals_df = signals_df[valid_mask].reset_index(drop=True)
+        
+    if signals_df.empty:
+        return JSONResponse(content={
+            "status": "success",
+            "start_date": req.start_date,
+            "end_date": req.end_date,
+            "total_trades": 0,
+            "monthly_summary": [],
+            "trades": [],
+            "market_regime_stats": {
+                "enabled": req.enable_market_filter,
+                "index_name": index_name_cn,
+                "ma_period": req.market_filter_ma,
+                "rule": rule_desc,
+                "total_signals": 0,
+                "executed_trades": 0,
+                "bypassed_trades": 0,
+                "bypass_ratio": 0.0
+            }
+        })
+        
+    # Load GBBQ and stock names
+    tdx_dir = load_tdx_dir()
+    names_map = load_stock_names(tdx_dir)
+    
+    from backtester import StrategyBacktester
+    tester = StrategyBacktester()
+    
+    unique_symbols = signals_df['symbol'].unique()
+    stock_kline_cache = {}
+    for sym in unique_symbols:
+        filepath = os.path.join(DATA_STORE_DIR, f"{sym}.parquet")
+        if os.path.exists(filepath):
+            try:
+                df = pd.read_parquet(filepath)
+                df['date'] = pd.to_datetime(df['date'])
+                df.sort_values(by='date', inplace=True)
+                df.reset_index(drop=True, inplace=True)
+                
+                # Precompute Stock Trend Confirmation Indicators
+                df['ma30_daily'] = df['close'].rolling(30).mean()
+                df['ma30_daily_slope'] = df['ma30_daily'] - df['ma30_daily'].shift(1)
+                
+                # Weekly MA30 (Exact 30-week moving average of weekly closes)
+                df['year_week'] = df['date'].dt.isocalendar().year.astype(str) + "_" + df['date'].dt.isocalendar().week.astype(str)
+                weekly_closes = df.groupby('year_week').last().reset_index()
+                weekly_closes['ma30_weekly'] = weekly_closes['close'].rolling(30).mean()
+                weekly_map = dict(zip(weekly_closes['year_week'], weekly_closes['ma30_weekly']))
+                df['ma30_weekly'] = df['year_week'].map(weekly_map)
+                
+                # Monthly MA30 (Exact 30-month moving average of monthly closes)
+                df['year_month'] = df['date'].dt.year.astype(str) + "_" + df['date'].dt.month.astype(str)
+                monthly_closes = df.groupby('year_month').last().reset_index()
+                monthly_closes['ma30_monthly'] = monthly_closes['close'].rolling(30).mean()
+                monthly_map = dict(zip(monthly_closes['year_month'], monthly_closes['ma30_monthly']))
+                df['ma30_monthly'] = df['year_month'].map(monthly_map)
+                
+                stock_kline_cache[sym] = df
+            except Exception as e:
+                print(f"Error computing stock trend indicators for {sym}: {e}")
+                stock_kline_cache[sym] = df
+                
+    # Apply stock trend confirmation filters if enabled
+    if req.enable_stock_trend_confirm and not signals_df.empty:
+        valid_indices = []
+        for idx, row in signals_df.iterrows():
+            sym = row['symbol']
+            sig_date = pd.to_datetime(row['date'])
+            if sym in stock_kline_cache:
+                df = stock_kline_cache[sym]
+                match = df[df['date'] == sig_date]
+                if not match.empty:
+                    m_row = match.iloc[0]
+                    close_val = m_row['close']
+                    ma30_d = m_row.get('ma30_daily', None)
+                    slope_d = m_row.get('ma30_daily_slope', None)
+                    ma30_w = m_row.get('ma30_weekly', None)
+                    ma30_m = m_row.get('ma30_monthly', None)
+                    
+                    keep = True
+                    # 1. Daily MA30 slope positive
+                    if req.confirm_ma30_daily_slope_pos and slope_d is not None and not pd.isna(slope_d):
+                        if not (slope_d > 0):
+                            keep = False
+                    # 2. Stand on Daily MA30
+                    if req.confirm_above_ma30_daily and ma30_d is not None and not pd.isna(ma30_d):
+                        if not (close_val > ma30_d):
+                            keep = False
+                    # 3. Stand on Weekly MA30
+                    if req.confirm_above_ma30_weekly and ma30_w is not None and not pd.isna(ma30_w):
+                        if not (close_val > ma30_w):
+                            keep = False
+                    # 4. Stand on Monthly MA30
+                    if req.confirm_above_ma30_monthly and ma30_m is not None and not pd.isna(ma30_m):
+                        if not (close_val > ma30_m):
+                            keep = False
+                            
+                    if keep:
+                        valid_indices.append(idx)
+                else:
+                    valid_indices.append(idx)
+            else:
+                valid_indices.append(idx)
+        signals_df = signals_df.loc[valid_indices].reset_index(drop=True)
+            
+    trades = []
+    bypassed_count = 0
+    signals_grouped = signals_df.groupby('symbol')
+    
+    for sym, sym_signals in signals_grouped:
+        if sym not in stock_kline_cache:
+            continue
+        df = stock_kline_cache[sym]
+        date_to_idx = {d: i for i, d in enumerate(df['date'])}
+        
+        sym_signals['signal_month'] = sym_signals['date'].apply(lambda x: x.strftime('%Y-%m'))
+        
+        for m_str, m_signals in sym_signals.groupby('signal_month'):
+            rank1_signals = m_signals[m_signals['limit_up_rank'] == 1]
+            rank2_signals = m_signals[m_signals['limit_up_rank'] == 2]
+            
+            if rank1_signals.empty:
+                continue
+                
+            sig_1 = rank1_signals.iloc[0]
+            t_date = pd.to_datetime(sig_1['date'])
+            t_idx = date_to_idx.get(t_date)
+            
+            if t_idx is None or t_idx + 1 >= len(df):
+                continue
+                
+            bought = False
+            buy_idx = None
+            buy_price_adj = None
+            buy_price = None
+            buy_date = None
+            buy_type = None
+            
+            t_plus_1_row = df.iloc[t_idx + 1]
+            t_close_adj = sig_1['close_adj']
+            
+            if t_plus_1_row['low_adj'] <= t_close_adj <= t_plus_1_row['high_adj']:
+                bought = True
+                buy_idx = t_idx + 1
+                buy_price_adj = t_close_adj
+                buy_price = sig_1['close']
+                buy_date = t_plus_1_row['date']
+                buy_type = "First_Limit_Up"
+            else:
+                if not rank2_signals.empty:
+                    sig_2 = rank2_signals.iloc[0]
+                    t2_date = pd.to_datetime(sig_2['date'])
+                    t2_idx = date_to_idx.get(t2_date)
+                    
+                    if t2_idx is not None and t2_idx + 1 < len(df):
+                        trading_days_gap = t2_idx - t_idx
+                        price_gain = (sig_2['close_adj'] - t_close_adj) / t_close_adj
+                        if trading_days_gap <= 10 and price_gain <= 0.20:
+                            t2_plus_1_row = df.iloc[t2_idx + 1]
+                            t2_close_adj = sig_2['close_adj']
+                            if t2_plus_1_row['low_adj'] <= t2_close_adj <= t2_plus_1_row['high_adj']:
+                                bought = True
+                                buy_idx = t2_idx + 1
+                                buy_price_adj = t2_close_adj
+                                buy_price = sig_2['close']
+                                buy_date = t2_plus_1_row['date']
+                                buy_type = "Second_Limit_Up"
+                                
+            if bought:
+                # Apply market regime filter
+                if req.enable_market_filter:
+                    t_date_str = t_date.strftime('%Y-%m-%d')
+                    is_regime_ok = index_regime.get(t_date_str, True)
+                    if not is_regime_ok:
+                        bypassed_count += 1
+                        continue # Skip this trade entirely!
+                        
+                mcap = tester.get_float_market_cap(sym, buy_date, buy_price)
+                
+                # Classify Cap
+                if mcap < 50e8:
+                    mcap_class = "50亿以下"
+                elif mcap < 200e8:
+                    mcap_class = "50~200亿"
+                elif mcap < 500e8:
+                    mcap_class = "200~500亿"
+                elif mcap < 1000e8:
+                    mcap_class = "500~1000亿"
+                else:
+                    mcap_class = "1000亿以上"
+                    
+                stock_name = names_map.get(sym, "未知股票")
+                buy_factor = sig_1['factor'] if buy_type == "First_Limit_Up" else rank2_signals.iloc[0]['factor']
+                
+                shares = int((req.capital / buy_price) // 100) * 100
+                if shares == 0:
+                    shares = 100
+                actual_spend = shares * buy_price
+                
+                trade_record = {
+                    "symbol": sym.upper(),
+                    "name": stock_name,
+                    "signal_month": m_str,
+                    "signal_date": t_date.strftime('%Y-%m-%d'),
+                    "buy_date": buy_date.strftime('%Y-%m-%d'),
+                    "buy_price": buy_price,
+                    "buy_type": buy_type,
+                    "float_market_cap": round(mcap / 1e8, 2), # 亿元
+                    "mcap_class": mcap_class,
+                    "buy_shares": shares,
+                    "actual_spend": round(actual_spend, 2)
+                }
+                
+                for H, label in [(20, '1m'), (40, '2m'), (60, '3m'), (80, '4m'), (100, '5m'), (120, '6m')]:
+                    exit_idx = buy_idx + H
+                    if exit_idx < len(df):
+                        # Check stop-loss early trigger
+                        is_stopped_out = False
+                        stop_idx = None
+                        
+                        if req.enable_stop_loss:
+                            stop_loss_price_adj = buy_price_adj * (1 - req.stop_loss_pct / 100.0)
+                            # Scan from buy day (buy_idx) to target exit day (exit_idx)
+                            for t_step in range(buy_idx, exit_idx + 1):
+                                if t_step < len(df):
+                                    row_t = df.iloc[t_step]
+                                    # Use low_adj to represent intra-day stop-loss breach
+                                    if row_t['low_adj'] <= stop_loss_price_adj:
+                                        is_stopped_out = True
+                                        stop_idx = t_step
+                                        break
+                                        
+                        if is_stopped_out and stop_idx is not None:
+                            exit_row = df.iloc[stop_idx]
+                            exit_date = exit_row['date']
+                            # Set stopped-out values
+                            exit_price_adj = buy_price_adj * (1 - req.stop_loss_pct / 100.0)
+                            exit_price = buy_price * (1 - req.stop_loss_pct / 100.0)
+                            ret = -req.stop_loss_pct / 100.0
+                            pl_yuan = shares * (exit_price_adj - buy_price_adj) / buy_factor
+                        else:
+                            exit_row = df.iloc[exit_idx]
+                            exit_date = exit_row['date']
+                            exit_price = exit_row['close']
+                            exit_price_adj = exit_row['close_adj']
+                            ret = (exit_price_adj - buy_price_adj) / buy_price_adj
+                            pl_yuan = shares * (exit_price_adj - buy_price_adj) / buy_factor
+                        
+                        trade_record[f"exit_date_{label}"] = exit_date.strftime('%Y-%m-%d')
+                        trade_record[f"exit_price_{label}"] = round(exit_price, 2)
+                        trade_record[f"ret_{label}"] = round(ret * 100, 2) # 百分比
+                        trade_record[f"pl_{label}"] = round(pl_yuan, 2)
+                    else:
+                        trade_record[f"exit_date_{label}"] = "数据不足"
+                        trade_record[f"exit_price_{label}"] = None
+                        trade_record[f"ret_{label}"] = None
+                        trade_record[f"pl_{label}"] = None
+                trades.append(trade_record)
+                
+    trades_df = pd.DataFrame(trades)
+    if trades_df.empty:
+        total_sig = bypassed_count
+        return JSONResponse(content={
+            "status": "success",
+            "start_date": req.start_date,
+            "end_date": req.end_date,
+            "total_trades": 0,
+            "monthly_summary": [],
+            "trades": [],
+            "market_regime_stats": {
+                "enabled": req.enable_market_filter,
+                "index_name": index_name_cn,
+                "ma_period": req.market_filter_ma,
+                "rule": rule_desc,
+                "total_signals": total_sig,
+                "executed_trades": 0,
+                "bypassed_trades": bypassed_count,
+                "bypass_ratio": 100.0 if total_sig > 0 else 0.0
+            }
+        })
+        
+    trades_df['buy_date_dt'] = pd.to_datetime(trades_df['buy_date'])
+    trades_df.sort_values(by='buy_date_dt', inplace=True)
+    
+    # Compute monthly summary stats
+    months_list = sorted(trades_df['signal_month'].unique())
+    monthly_summary = []
+    
+    for m_str in months_list:
+        m_df = trades_df[trades_df['signal_month'] == m_str]
+        m_count = len(m_df)
+        
+        stat = {"month": m_str, "count": m_count}
+        for label in ['1m', '2m', '3m', '4m', '5m', '6m']:
+            valid = m_df[m_df[f'exit_date_{label}'] != "数据不足"]
+            v_cnt = len(valid)
+            if v_cnt > 0:
+                avg_ret = valid[f'ret_{label}'].mean()
+                win_rate = (valid[f'ret_{label}'] > 0).sum() / v_cnt * 100
+                total_pl = valid[f'pl_{label}'].sum()
+                
+                stat[f"{label}_ret"] = round(avg_ret, 2)
+                stat[f"{label}_win"] = round(win_rate, 2)
+                stat[f"{label}_pl"] = round(total_pl, 2)
+            else:
+                stat[f"{label}_ret"] = None
+                stat[f"{label}_win"] = None
+                stat[f"{label}_pl"] = None
+                
+        # Calculate market cap classification statistics for this month
+        mcap_stats = []
+        for mcap_c in ["50亿以下", "50~200亿", "200~500亿", "500~1000亿", "1000亿以上"]:
+            sub_df = m_df[m_df['mcap_class'] == mcap_c]
+            sub_count = len(sub_df)
+            
+            sub_stat = {"mcap_class": mcap_c, "count": sub_count}
+            for label in ['1m', '2m', '3m', '4m', '5m', '6m']:
+                if sub_count > 0:
+                    valid = sub_df[sub_df[f'exit_date_{label}'] != "数据不足"]
+                    v_cnt = len(valid)
+                    if v_cnt > 0:
+                        avg_ret = valid[f'ret_{label}'].mean()
+                        win_rate = (valid[f'ret_{label}'] > 0).sum() / v_cnt * 100
+                        total_pl = valid[f'pl_{label}'].sum()
+                        
+                        sub_stat[f"{label}_ret"] = round(avg_ret, 2)
+                        sub_stat[f"{label}_win"] = round(win_rate, 2)
+                        sub_stat[f"{label}_pl"] = round(total_pl, 2)
+                    else:
+                        sub_stat[f"{label}_ret"] = None
+                        sub_stat[f"{label}_win"] = None
+                        sub_stat[f"{label}_pl"] = None
+                else:
+                    sub_stat[f"{label}_ret"] = None
+                    sub_stat[f"{label}_win"] = None
+                    sub_stat[f"{label}_pl"] = None
+            mcap_stats.append(sub_stat)
+            
+        stat["mcap_stats"] = mcap_stats
+        monthly_summary.append(stat)
+        
+    cleaned_trades = []
+    for _, r in trades_df.iterrows():
+        t_dict = r.to_dict()
+        if 'buy_date_dt' in t_dict:
+            del t_dict['buy_date_dt']
+        cleaned_trades.append(t_dict)
+        
+    t_end = time.perf_counter()
+    executed_count = len(trades_df)
+    total_sig = executed_count + bypassed_count
+    bp_ratio = round(bypassed_count / total_sig * 100, 2) if total_sig > 0 else 0.0
+    
+    regime_stats = {
+        "enabled": req.enable_market_filter,
+        "index_name": index_name_cn,
+        "ma_period": req.market_filter_ma,
+        "rule": rule_desc,
+        "total_signals": total_sig,
+        "executed_trades": executed_count,
+        "bypassed_trades": bypassed_count,
+        "bypass_ratio": bp_ratio
+    }
+
+    response_data = {
+        "status": "success",
+        "elapsed_seconds": round(t_end - t_start, 4),
+        "start_date": req.start_date,
+        "end_date": req.end_date,
+        "total_trades": len(trades_df),
+        "monthly_summary": monthly_summary,
+        "trades": cleaned_trades,
+        "market_regime_stats": regime_stats
+    }
+    
+    # Recursively convert any float 'nan' or 'inf' to None
+    import math
+    def clean_nan(obj):
+        if isinstance(obj, dict):
+            return {k: clean_nan(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [clean_nan(v) for v in obj]
+        elif isinstance(obj, float):
+            if math.isnan(obj) or math.isinf(obj):
+                return None
+            return obj
+        return obj
+
+    cleaned_response = clean_nan(response_data)
+    return JSONResponse(content=cleaned_response)
 
 # -------------------------------------------------------------
 # 9. 动态托管 HTML 赛博看板 (GET /)

@@ -123,6 +123,9 @@
                 <button @click="switchTab('broker_radar')" :class="['px-5 py-2 rounded-lg text-xs font-semibold tracking-wider flex items-center gap-2 transition-all', activeTab === 'broker_radar' ? 'bg-cyber-primary/10 border border-cyber-primary/20 text-cyber-primary' : 'text-cyber-textMuted hover:text-white']">
                     🐉 游资雷达
                 </button>
+                <button @click="switchTab('research')" :class="['px-5 py-2 rounded-lg text-xs font-semibold tracking-wider flex items-center gap-2 transition-all', activeTab === 'research' ? 'bg-cyber-primary/10 border border-cyber-primary/20 text-cyber-primary' : 'text-cyber-textMuted hover:text-white']">
+                    🔬 策略研究
+                </button>
             </nav>
 
             <div class="flex items-center gap-4 text-xs font-mono">
@@ -1546,6 +1549,734 @@
                 </div>
             </div>
 
+            <!-- ======================= 🔬 TAB 7: 策略研究 ======================= -->
+            <div v-show="activeTab === 'research'" class="space-y-8 relative min-h-[500px]">
+                
+                <!-- 1. 策略列表/研究大厅 (Directory View) -->
+                <div v-if="selectedResearchStrategy === null" class="space-y-6">
+                    <div class="flex flex-col gap-1 border-b border-white/5 pb-4">
+                        <h2 class="text-lg font-bold text-white flex items-center gap-2">
+                            <span>🔬</span> 策略研究中心
+                        </h2>
+                        <p class="text-xs text-cyber-textMuted font-mono uppercase tracking-widest text-[9px]">TACTICAL QUANT STRATEGY RESEARCH SUITE</p>
+                    </div>
+
+                    <!-- 策略卡片网格 -->
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                        <!-- 卡片 1: 异常放量首次涨停 (Active) -->
+                        <div class="glass-card rounded-2xl p-6 flex flex-col justify-between transition-all hover:-translate-y-1 cursor-pointer border border-cyber-border hover:border-cyber-primary/40 group bg-cyber-card/60" @click="selectedResearchStrategy = 'abnormal_volume'">
+                            <div class="space-y-4">
+                                <div class="flex items-center justify-between">
+                                    <span class="text-2xl p-3 bg-cyber-primary/10 rounded-xl text-cyber-primary shadow-[0_0_10px_rgba(6,182,212,0.1)]">📊</span>
+                                    <span class="bg-cyber-primary/10 border border-cyber-primary/20 text-cyber-primary text-[9px] px-2 py-0.5 rounded font-mono font-bold">可运行 (ACTIVE)</span>
+                                </div>
+                                <div class="space-y-1.5">
+                                    <h3 class="text-sm font-bold text-white group-hover:text-cyber-primary transition-colors">月度级异常放量首次涨停低吸策略</h3>
+                                    <p class="text-[11px] text-cyber-textMuted leading-relaxed">
+                                        基于月级环比巨量异常放量因子，并在当月首板或二板涨停的次日开盘进行昨收价挂单拦截低吸。按持仓 20/40/60/120 交易日跟踪出仓盈亏与市值阶梯绩效。
+                                    </p>
+                                </div>
+                            </div>
+                            <div class="border-t border-white/5 pt-4 mt-6 flex items-center justify-between text-[11px]">
+                                <span class="text-cyber-textMuted font-mono">FACTOR QUANTITY: 5</span>
+                                <span class="text-cyber-primary font-bold flex items-center gap-1 group-hover:translate-x-1 transition-all">点击进入策略回测 ➔</span>
+                            </div>
+                        </div>
+
+                        <!-- 卡片 2: 均线强粘合突破共振策略 (Locked) -->
+                        <div class="glass-card rounded-2xl p-6 flex flex-col justify-between opacity-60 border border-white/5 bg-cyber-card/30 relative overflow-hidden group">
+                            <div class="space-y-4">
+                                <div class="flex items-center justify-between">
+                                    <span class="text-2xl p-3 bg-white/5 rounded-xl text-cyber-textMuted">📈</span>
+                                    <span class="bg-white/5 border border-white/10 text-cyber-textMuted text-[9px] px-2 py-0.5 rounded font-mono">研发中 (LOCKED)</span>
+                                </div>
+                                <div class="space-y-1.5">
+                                    <h3 class="text-sm font-bold text-white/80">均线多头强粘合共振突破模型</h3>
+                                    <p class="text-[11px] text-cyber-textMuted leading-relaxed">
+                                        通过对 5/10/20/30/60/120 日均线宽度偏离度收敛度判定，筛选在 3% 窄幅极度粘合后，配合全A大势资金共振突破，启动主升浪回测。
+                                    </p>
+                                </div>
+                            </div>
+                            <div class="border-t border-white/5 pt-4 mt-6 flex items-center justify-between text-[11px]">
+                                <span class="text-cyber-textMuted font-mono">FACTOR QUANTITY: 7</span>
+                                <span class="text-cyber-textMuted/60">深度研发筹备中...</span>
+                            </div>
+                        </div>
+
+                        <!-- 卡片 3: 极值超跌乖离反转策略 (Locked) -->
+                        <div class="glass-card rounded-2xl p-6 flex flex-col justify-between opacity-60 border border-white/5 bg-cyber-card/30 relative overflow-hidden group">
+                            <div class="space-y-4">
+                                <div class="flex items-center justify-between">
+                                    <span class="text-2xl p-3 bg-white/5 rounded-xl text-cyber-textMuted">📉</span>
+                                    <span class="bg-white/5 border border-white/10 text-cyber-textMuted text-[9px] px-2 py-0.5 rounded font-mono">研发中 (LOCKED)</span>
+                                </div>
+                                <div class="space-y-1.5">
+                                    <h3 class="text-sm font-bold text-white/80">极值乖离率超跌黄金反转模型</h3>
+                                    <p class="text-[11px] text-cyber-textMuted leading-relaxed">
+                                        利用 BIAS (20/60) 指标在空头走势下的三次钝化偏离极值，触发恐慌盘洗净黄金坑信号，并以前置筹码密集区作为移动止盈挂单拦截。
+                                    </p>
+                                </div>
+                            </div>
+                            <div class="border-t border-white/5 pt-4 mt-6 flex items-center justify-between text-[11px]">
+                                <span class="text-cyber-textMuted font-mono">FACTOR QUANTITY: 4</span>
+                                <span class="text-cyber-textMuted/60">算法评测中...</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 2. 月级异常放量策略详情与回测面板 (Strategy Specific View) -->
+                <div v-else-if="selectedResearchStrategy === 'abnormal_volume'" class="space-y-6">
+                    <!-- 返回头部 -->
+                    <div class="flex items-center justify-between border-b border-white/5 pb-4">
+                        <button @click="selectedResearchStrategy = null" class="bg-white/5 hover:bg-white/10 border border-white/10 text-white px-4 py-2 rounded-xl text-xs font-semibold flex items-center gap-2 transition-all">
+                            <span>⬅</span> 返回策略列表
+                        </button>
+                        <div class="text-right">
+                            <h2 class="text-sm font-bold text-white">月级异常放量首次涨停低吸策略</h2>
+                            <p class="text-[10px] text-cyber-textMuted font-mono">ABNORMAL VOLUME & LIMIT UP BACKTEST PANEL</p>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 lg:grid-cols-4 gap-8">
+                        <!-- Left Control Panel -->
+                        <div class="glass-card rounded-2xl p-6 lg:col-span-1 space-y-6">
+                            <div class="flex items-center gap-3 border-b border-white/5 pb-4">
+                                <span class="text-xl">📊</span>
+                                <div>
+                                    <h3 class="text-sm font-semibold text-white">因子权重与参数设置</h3>
+                                    <p class="text-[10px] text-cyber-textMuted font-mono">FACTOR ADJUSTMENT</p>
+                                </div>
+                            </div>
+
+                            <div class="space-y-4 text-xs">
+                                <!-- 时间区间选择 -->
+                                <div class="space-y-2">
+                                    <label class="text-cyber-textMuted font-medium block">回测时间区间</label>
+                                    <div class="grid grid-cols-2 gap-2">
+                                        <!-- 开始年月 -->
+                                        <div>
+                                            <span class="text-[10px] text-cyber-textMuted block mb-1">开始年份</span>
+                                            <select v-model="abVolumeParams.start_year" class="w-full bg-[#0b111e] border border-white/10 rounded-xl px-2 py-1.5 text-white focus:outline-none focus:border-cyber-primary/50 text-[11px]">
+                                                <option v-for="y in yearsList" :key="y" :value="y">{{ y }} 年</option>
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <span class="text-[10px] text-cyber-textMuted block mb-1">开始月份</span>
+                                            <select v-model="abVolumeParams.start_month" class="w-full bg-[#0b111e] border border-white/10 rounded-xl px-2 py-1.5 text-white focus:outline-none focus:border-cyber-primary/50 text-[11px]">
+                                                <option v-for="m in monthsList" :key="m" :value="m">{{ m }} 月</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                    <div class="grid grid-cols-2 gap-2 mt-2">
+                                        <!-- 结束年月 -->
+                                        <div>
+                                            <span class="text-[10px] text-cyber-textMuted block mb-1">结束年份</span>
+                                            <select v-model="abVolumeParams.end_year" class="w-full bg-[#0b111e] border border-white/10 rounded-xl px-2 py-1.5 text-white focus:outline-none focus:border-cyber-primary/50 text-[11px]">
+                                                <option v-for="y in yearsList" :key="y" :value="y">{{ y }} 年</option>
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <span class="text-[10px] text-cyber-textMuted block mb-1">结束月份</span>
+                                            <select v-model="abVolumeParams.end_month" class="w-full bg-[#0b111e] border border-white/10 rounded-xl px-2 py-1.5 text-white focus:outline-none focus:border-cyber-primary/50 text-[11px]">
+                                                <option v-for="m in monthsList" :key="m" :value="m">{{ m }} 月</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="space-y-1.5">
+                                    <label class="text-cyber-textMuted font-medium block">放量倍数阈值 (较上月金额)</label>
+                                    <input type="number" step="0.5" v-model="abVolumeParams.vol_ratio_threshold" class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-cyber-primary/50 text-xs">
+                                </div>
+
+                                <!-- 放量月份要求数双参数 -->
+                                <div class="space-y-1.5 p-3 bg-white/3 border border-white/5 rounded-xl">
+                                    <span class="text-white font-bold block mb-2 text-[11px]">放量分析窗口双参数配置</span>
+                                    
+                                    <div class="space-y-2">
+                                        <label class="text-cyber-textMuted block text-[10px]">放量分析滚动周期</label>
+                                        <select v-model="abVolumeParams.lookback_months" class="w-full bg-[#0b111e] border border-white/10 rounded-xl px-3 py-1.5 text-white focus:outline-none focus:border-cyber-primary/50 text-[11px]">
+                                            <option :value="12">过去 12 个月 (默认)</option>
+                                            <option :value="24">过去 24 个月</option>
+                                        </select>
+                                    </div>
+
+                                    <div class="space-y-2 mt-2.5">
+                                        <label class="text-cyber-textMuted block text-[10px]">放量触发次数要求 (个/月)</label>
+                                        <input type="number" v-model="abVolumeParams.abnormal_months_threshold" class="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-1.5 text-white focus:outline-none focus:border-cyber-primary/50 text-[11px]">
+                                    </div>
+                                </div>
+
+                                <!-- 历史价格过滤锁 -->
+                                <div class="space-y-2.5 p-3 bg-white/3 border border-white/5 rounded-xl shadow-[0_0_10px_rgba(255,255,255,0.02)]">
+                                    <div class="flex items-center justify-between">
+                                        <span class="text-white font-bold block text-[11px] flex items-center gap-1.5">
+                                            <span>📊</span> 历史价格过滤锁
+                                        </span>
+                                        <label class="relative inline-flex items-center cursor-pointer">
+                                            <input type="checkbox" v-model="abVolumeParams.enable_vol_position_filter" class="sr-only peer">
+                                            <div class="w-7 h-4 bg-white/10 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-cyber-primary"></div>
+                                        </label>
+                                    </div>
+                                    
+                                    <div v-if="abVolumeParams.enable_vol_position_filter" class="space-y-3 mt-2 pt-2 border-t border-white/5 animate-fadeIn">
+                                        <!-- 上限过滤乘数 -->
+                                        <div class="space-y-1">
+                                            <div class="flex items-center justify-between">
+                                                <label class="text-cyber-textMuted block text-[10px]">历史价格上限过滤乘数 (Upper)</label>
+                                                <span class="text-cyber-primary font-mono text-[10px] font-bold">{{ abVolumeParams.vol_position_multiplier }}x</span>
+                                            </div>
+                                            <input type="range" min="1.0" max="1.8" step="0.05" v-model="abVolumeParams.vol_position_multiplier" class="w-full h-1 bg-white/10 rounded-lg appearance-none cursor-pointer accent-cyber-primary">
+                                        </div>
+
+                                        <!-- 下限过滤乘数 -->
+                                        <div class="space-y-1">
+                                            <div class="flex items-center justify-between">
+                                                <label class="text-cyber-textMuted block text-[10px]">历史价格下限过滤乘数 (Lower)</label>
+                                                <span class="text-cyber-primary font-mono text-[10px] font-bold">{{ abVolumeParams.hist_price_lower_mult }}x</span>
+                                            </div>
+                                            <input type="range" min="0.4" max="0.9" step="0.05" v-model="abVolumeParams.hist_price_lower_mult" class="w-full h-1 bg-white/10 rounded-lg appearance-none cursor-pointer accent-cyber-primary">
+                                        </div>
+                                        
+                                        <!-- 说明逻辑的小提示框 -->
+                                        <div class="p-2 rounded-lg bg-white/5 border border-white/5 text-[9px] text-cyber-textMuted leading-relaxed animate-fadeIn space-y-1">
+                                            <div>💡 <b>通道过滤逻辑 (Symmetric Channel)</b>：</div>
+                                            <div class="pl-2 border-l border-white/10 font-mono text-[8.5px] text-white/70">
+                                                hist_max_high_adj &le; close * {{ abVolumeParams.vol_position_multiplier }} <br>
+                                                hist_min_low_adj &ge; close * {{ abVolumeParams.hist_price_lower_mult }}
+                                            </div>
+                                            <div>在回溯窗口（默认 12 个月，不含当月）内，个股历史最高价不能高过涨停收盘价的 <span class="text-white font-bold font-mono">{{ abVolumeParams.vol_position_multiplier }}x</span> 且历史最低价不能低于涨停收盘价的 <span class="text-white font-bold font-mono">{{ abVolumeParams.hist_price_lower_mult }}x</span>。剔除高位套牢密集区或无强力支撑的超跌弱势股！</div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- 个股趋势确认 -->
+                                <div class="space-y-2.5 p-3 bg-white/3 border border-white/5 rounded-xl shadow-[0_0_10px_rgba(255,255,255,0.02)] animate-fadeIn">
+                                    <div class="flex items-center justify-between">
+                                        <span class="text-white font-bold block text-[11px] flex items-center gap-1.5">
+                                            <span>📈</span> 个股趋势确认
+                                        </span>
+                                        <label class="relative inline-flex items-center cursor-pointer">
+                                            <input type="checkbox" v-model="abVolumeParams.enable_stock_trend_confirm" class="sr-only peer">
+                                            <div class="w-7 h-4 bg-white/10 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-cyber-primary"></div>
+                                        </label>
+                                    </div>
+                                    
+                                    <div v-if="abVolumeParams.enable_stock_trend_confirm" class="space-y-2 mt-2 pt-2 border-t border-white/5 animate-fadeIn">
+                                        <!-- 日MA30斜率为正 -->
+                                        <div class="flex items-center justify-between py-0.5">
+                                            <span class="text-cyber-textMuted text-[10px]">日 MA30 斜率为正</span>
+                                            <label class="relative inline-flex items-center cursor-pointer">
+                                                <input type="checkbox" v-model="abVolumeParams.confirm_ma30_daily_slope_pos" class="sr-only peer">
+                                                <div class="w-6 h-3.5 bg-white/10 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-2.5 after:w-2.5 after:transition-all peer-checked:bg-cyber-primary"></div>
+                                            </label>
+                                        </div>
+
+                                        <!-- 站上日MA30 -->
+                                        <div class="flex items-center justify-between py-0.5">
+                                            <span class="text-cyber-textMuted text-[10px]">站上日 MA30</span>
+                                            <label class="relative inline-flex items-center cursor-pointer">
+                                                <input type="checkbox" v-model="abVolumeParams.confirm_above_ma30_daily" class="sr-only peer">
+                                                <div class="w-6 h-3.5 bg-white/10 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-2.5 after:w-2.5 after:transition-all peer-checked:bg-cyber-primary"></div>
+                                            </label>
+                                        </div>
+
+                                        <!-- 站上周MA30 -->
+                                        <div class="flex items-center justify-between py-0.5">
+                                            <span class="text-cyber-textMuted text-[10px]">站上周 MA30</span>
+                                            <label class="relative inline-flex items-center cursor-pointer">
+                                                <input type="checkbox" v-model="abVolumeParams.confirm_above_ma30_weekly" class="sr-only peer">
+                                                <div class="w-6 h-3.5 bg-white/10 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-2.5 after:w-2.5 after:transition-all peer-checked:bg-cyber-primary"></div>
+                                            </label>
+                                        </div>
+
+                                        <!-- 站上月MA30 -->
+                                        <div class="flex items-center justify-between py-0.5">
+                                            <span class="text-cyber-textMuted text-[10px]">站上月 MA30</span>
+                                            <label class="relative inline-flex items-center cursor-pointer">
+                                                <input type="checkbox" v-model="abVolumeParams.confirm_above_ma30_monthly" class="sr-only peer">
+                                                <div class="w-6 h-3.5 bg-white/10 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-2.5 after:w-2.5 after:transition-all peer-checked:bg-cyber-primary"></div>
+                                            </label>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- 大势均线大势过滤锁 -->
+                                <div class="space-y-2.5 p-3 bg-cyber-primary/5 border border-cyber-primary/20 rounded-xl shadow-[0_0_10px_rgba(6,182,212,0.05)]">
+                                    <div class="flex items-center justify-between">
+                                        <span class="text-cyber-primary font-bold block text-[11px] flex items-center gap-1.5 transition-colors duration-300">
+                                            <span :class="presetShieldColor">🛡️</span> 大势均线大势过滤锁
+                                        </span>
+                                        <label class="relative inline-flex items-center cursor-pointer">
+                                            <input type="checkbox" v-model="abVolumeParams.enable_market_filter" class="sr-only peer">
+                                            <div class="w-7 h-4 bg-white/10 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-cyber-primary"></div>
+                                        </label>
+                                    </div>
+                                    
+                                    <div v-if="abVolumeParams.enable_market_filter" class="space-y-2.5 mt-2 pt-2 border-t border-white/5 animate-fadeIn">
+                                        <div class="space-y-1">
+                                            <label class="text-cyber-textMuted block text-[10px]">参考大盘指数</label>
+                                            <select v-model="abVolumeParams.market_filter_index" class="w-full bg-[#0b111e] border border-white/10 rounded-xl px-3 py-1.5 text-white focus:outline-none focus:border-cyber-primary/50 text-[11px]">
+                                                <option value="sh000852">中证1000指数 (sh000852)</option>
+                                                <option value="sh000300">沪深300指数 (sh000300)</option>
+                                                <option value="sh000001">上证指数 (sh000001)</option>
+                                                <option value="sz399001">深证成指 (sz399001)</option>
+                                                <option value="sz399006">创业板指 (sz399006)</option>
+                                                <option value="sh000016">上证50指数 (sh000016)</option>
+                                                <option value="sh000010">上证180指数 (sh000010)</option>
+                                            </select>
+                                        </div>
+
+                                        <div class="grid grid-cols-2 gap-2">
+                                            <div>
+                                                <label class="text-cyber-textMuted block text-[10px] mb-1">滚动均线周期</label>
+                                                <select v-model="abVolumeParams.market_filter_ma" class="w-full bg-[#0b111e] border border-white/10 rounded-xl px-2 py-1.5 text-white focus:outline-none focus:border-cyber-primary/50 text-[11px]">
+                                                    <option :value="60">MA60 均线</option>
+                                                    <option :value="120">MA120 均线</option>
+                                                    <option :value="250">MA250 均线</option>
+                                                </select>
+                                            </div>
+                                            <div>
+                                                <label class="text-cyber-textMuted block text-[10px] mb-1">过滤预设模式</label>
+                                                <select v-model="abVolumeParams.market_filter_preset" class="w-full bg-[#0b111e] border border-white/10 rounded-xl px-2 py-1.5 text-white focus:outline-none focus:border-cyber-primary/50 text-[11px]">
+                                                    <option value="resonance">🚀 强趋势共振锁 (首选)</option>
+                                                    <option value="pullback">🟡 牛市黄金回踩锁</option>
+                                                    <option value="reversal">⚠️ 逆势超跌反弹锁</option>
+                                                    <option value="custom">⚙️ 自定义参数配置</option>
+                                                </select>
+                                            </div>
+                                        </div>
+
+                                        <!-- 说明逻辑的小提示框 -->
+                                        <div class="p-2 rounded-lg bg-white/5 border border-white/5 text-[9px] text-cyber-textMuted leading-relaxed animate-fadeIn">
+                                            💡 <b>过滤逻辑</b>：
+                                            <span class="text-white/90">{{ activePresetDescription }}</span>
+                                        </div>
+
+                                        <!-- 自定义高级过滤子卡片 -->
+                                        <div v-if="abVolumeParams.market_filter_preset === 'custom'" class="p-2 bg-black/40 border border-white/5 rounded-lg space-y-2.5 animate-fadeIn">
+                                            <div class="grid grid-cols-2 gap-2">
+                                                <div>
+                                                    <label class="text-cyber-textMuted block text-[9px] mb-1">均线斜率要求</label>
+                                                    <select v-model="abVolumeParams.market_filter_slope_rule" class="w-full bg-[#0b111e] border border-white/10 rounded-lg px-2 py-1 text-white focus:outline-none focus:border-cyber-primary/50 text-[10px]">
+                                                        <option value="up">向上 (Slope > 0)</option>
+                                                        <option value="down">向下 (Slope &lt; 0)</option>
+                                                        <option value="any">任意 (无斜率要求)</option>
+                                                    </select>
+                                                </div>
+                                                <div>
+                                                    <label class="text-cyber-textMuted block text-[9px] mb-1">指数与均线位置</label>
+                                                    <select v-model="abVolumeParams.market_filter_position_rule" class="w-full bg-[#0b111e] border border-white/10 rounded-lg px-2 py-1 text-white focus:outline-none focus:border-cyber-primary/50 text-[10px]">
+                                                        <option value="above">指数 > 均线 (突破/上方)</option>
+                                                        <option value="below">指数 &lt; 均线 (跌破/下方)</option>
+                                                        <option value="any">任意 (无位置要求)</option>
+                                                    </select>
+                                                </div>
+                                            </div>
+                                            <div class="flex items-center justify-between px-1.5 pt-0.5">
+                                                <span class="text-cyber-textMuted text-[9px]">斜率采样周期 (天数)</span>
+                                                <input type="number" min="2" max="30" v-model="abVolumeParams.market_filter_slope_days" class="w-12 bg-white/5 border border-white/10 rounded text-center text-white text-[10px] py-0.5 focus:outline-none focus:border-cyber-primary/50">
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- 退出策略风控（止损） -->
+                                <div class="space-y-2.5 p-3 bg-cyber-secondary/5 border border-cyber-secondary/20 rounded-xl shadow-[0_0_10px_rgba(236,72,153,0.05)]">
+                                    <div class="flex items-center justify-between">
+                                        <span class="text-cyber-secondary font-bold block text-[11px] flex items-center gap-1">
+                                            <span>🛡️</span> 退出策略风控锁 (可选)
+                                        </span>
+                                        <label class="relative inline-flex items-center cursor-pointer">
+                                            <input type="checkbox" v-model="abVolumeParams.enable_stop_loss" class="sr-only peer">
+                                            <div class="w-7 h-4 bg-white/10 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-cyber-secondary"></div>
+                                        </label>
+                                    </div>
+                                    
+                                    <div v-if="abVolumeParams.enable_stop_loss" class="space-y-2 mt-2 pt-2 border-t border-white/5 animate-fadeIn">
+                                        <div class="space-y-1">
+                                            <div class="flex justify-between text-[10px] text-cyber-textMuted">
+                                                <span>个股最大亏损止损比例</span>
+                                                <span class="text-cyber-secondary font-mono font-bold">-{{ abVolumeParams.stop_loss_pct }}%</span>
+                                            </div>
+                                            <input type="range" min="3" max="25" step="1" v-model="abVolumeParams.stop_loss_pct" class="w-full h-1 bg-white/10 rounded-lg appearance-none cursor-pointer accent-cyber-secondary">
+                                            <span class="text-[9px] text-cyber-textMuted block leading-tight">
+                                                💡 <b>逻辑</b>：建仓后，若任意交易日最低价跌破建仓价的 <b class="text-cyber-secondary">-{{ abVolumeParams.stop_loss_pct }}%</b>，则在当天触发早期止损卖出。
+                                            </span>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="space-y-1.5">
+                                    <label class="text-cyber-textMuted font-medium block">上市交易天数锁 (天)</label>
+                                    <input type="number" v-model="abVolumeParams.listing_days_threshold" class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-cyber-primary/50 text-xs">
+                                </div>
+
+                                <div class="space-y-1.5">
+                                    <label class="text-cyber-textMuted font-medium block">每股分配买入本金 (元)</label>
+                                    <input type="number" v-model="abVolumeParams.capital" class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-cyber-primary/50 text-xs">
+                                </div>
+
+                                <button @click="runAbnormalVolumeBacktest" 
+                                        :disabled="abVolumeLoading || isOffline"
+                                        class="w-full bg-gradient-to-r from-cyber-primary to-cyber-secondary hover:opacity-90 disabled:opacity-50 text-white font-semibold py-3 px-4 rounded-xl text-xs flex items-center justify-center gap-2 transition-all shadow-[0_0_15px_rgba(6,182,212,0.15)] disabled:cursor-not-allowed">
+                                    <span v-if="abVolumeLoading" class="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                                    <span>🚀 运行策略全回测对账</span>
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Right Display Panel -->
+                        <div class="glass-card rounded-2xl p-6 lg:col-span-3 space-y-6 overflow-hidden">
+                            <div class="flex items-center justify-between border-b border-white/5 pb-3">
+                                <div class="text-xs font-semibold flex items-center gap-2 flex-wrap">
+                                    <span class="flex items-center gap-1"><span>🏆</span> 策略回测期间月度表现总览</span>
+                                    <span v-if="abVolumeResult.start_date" class="text-cyber-primary font-mono text-[10px] bg-cyber-primary/10 border border-cyber-primary/20 px-2 py-0.5 rounded">
+                                        区间: {{ abVolumeResult.start_date }} 至 {{ abVolumeResult.end_date }}
+                                    </span>
+                                    <span class="text-cyber-textMuted font-mono">
+                                        (成交笔数: {{ abVolumeResult.total_trades || 0 }} 笔)
+                                    </span>
+                                </div>
+                                <div v-if="abVolumeResult.elapsed_seconds" class="text-[10px] text-cyber-textMuted font-mono">
+                                    链算耗时: <b class="text-cyber-primary">{{ abVolumeResult.elapsed_seconds }}s</b>
+                                </div>
+                            </div>
+
+                            <!-- 大势防御锁定统计横幅 -->
+                            <div v-if="abVolumeResult.market_regime_stats && abVolumeResult.market_regime_stats.enabled" 
+                                 class="p-4 bg-cyber-primary/5 border border-cyber-primary/30 rounded-2xl flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-[0_0_15px_rgba(6,182,212,0.05)] mb-4 animate-slideDown">
+                                <div class="space-y-1">
+                                    <div class="text-[11px] font-bold text-cyber-primary flex items-center gap-1.5">
+                                        <span>🛡️</span> 大势防御锁拦截生效中 ({{ abVolumeResult.market_regime_stats.index_name }})
+                                    </div>
+                                    <div class="text-[10px] text-cyber-textMuted leading-relaxed flex items-center gap-1.5">
+                                        大势风控规则：当满足 <span class="text-white font-bold bg-white/5 border border-white/10 px-2 py-0.5 rounded-full font-mono">{{ abVolumeResult.market_regime_stats.rule }}</span> 条件时，方可触发下一交易日低吸建仓。
+                                    </div>
+                                </div>
+                                
+                                <div class="grid grid-cols-4 gap-3 bg-[#080d19]/80 border border-white/5 rounded-xl px-4 py-2.5 text-center min-w-[280px]">
+                                    <div>
+                                        <span class="text-[9px] text-cyber-textMuted block font-mono">候选信号</span>
+                                        <span class="text-sm font-bold text-white font-mono">{{ abVolumeResult.market_regime_stats.total_signals }}</span>
+                                    </div>
+                                    <div>
+                                        <span class="text-[9px] text-cyber-textMuted block font-mono">成功规避</span>
+                                        <span class="text-sm font-bold text-cyber-down font-mono">{{ abVolumeResult.market_regime_stats.bypassed_trades }}</span>
+                                    </div>
+                                    <div>
+                                        <span class="text-[9px] text-cyber-textMuted block font-mono">最终交易</span>
+                                        <span class="text-sm font-bold text-cyber-up font-mono">{{ abVolumeResult.market_regime_stats.executed_trades }}</span>
+                                    </div>
+                                    <div>
+                                        <span class="text-[9px] text-cyber-textMuted block font-mono">防御拦截率</span>
+                                        <span class="text-sm font-bold text-cyber-primary font-mono">{{ abVolumeResult.market_regime_stats.bypass_ratio }}%</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- 2010全年度月度表现总览表格 -->
+                            <div class="overflow-x-auto rounded-xl border border-cyber-border/40">
+                                <table class="w-full text-left text-xs border-collapse">
+                                    <thead>
+                                        <tr class="bg-cyber-card text-[11px] text-cyber-textMuted font-mono border-b border-cyber-border">
+                                            <th class="py-3 px-3">月份</th>
+                                            <th class="py-3 px-3 text-center">成交笔数</th>
+                                            
+                                            <!-- 1m -->
+                                            <th class="py-3.5 px-3 text-right">
+                                                <div class="inline-flex items-center gap-1 bg-[#10192e] border border-white/10 rounded px-1.5 py-0.5 text-[10px] text-white font-bold">
+                                                    <span>📅</span> 1m (1个月)
+                                                </div>
+                                                <div class="text-[9px] text-cyber-textMuted font-normal mt-1 pr-1.5">回报 / 胜率 / 盈亏</div>
+                                            </th>
+                                            
+                                            <!-- 2m -->
+                                            <th class="py-3.5 px-3 text-right">
+                                                <div class="inline-flex items-center gap-1 bg-[#10192e] border border-white/10 rounded px-1.5 py-0.5 text-[10px] text-white font-bold">
+                                                    <span>📅</span> 2m (2个月)
+                                                </div>
+                                                <div class="text-[9px] text-cyber-textMuted font-normal mt-1 pr-1.5">回报 / 胜率 / 盈亏</div>
+                                            </th>
+                                            
+                                            <!-- 3m -->
+                                            <th class="py-3.5 px-3 text-right text-cyber-primary bg-cyber-primary/2 border-x border-cyber-primary/10">
+                                                <div class="inline-flex items-center gap-1 bg-cyber-primary/10 border border-cyber-primary/30 rounded px-1.5 py-0.5 text-[10px] text-cyber-primary font-bold">
+                                                    <span>🔥</span> 3m (3个月)
+                                                </div>
+                                                <div class="text-[9px] text-cyber-primary/70 font-normal mt-1 pr-1.5">回报 / 胜率 / 盈亏</div>
+                                            </th>
+                                            
+                                            <!-- 4m -->
+                                            <th class="py-3.5 px-3 text-right">
+                                                <div class="inline-flex items-center gap-1 bg-[#10192e] border border-white/10 rounded px-1.5 py-0.5 text-[10px] text-white font-bold">
+                                                    <span>📅</span> 4m (4个月)
+                                                </div>
+                                                <div class="text-[9px] text-cyber-textMuted font-normal mt-1 pr-1.5">回报 / 胜率 / 盈亏</div>
+                                            </th>
+                                            
+                                            <!-- 5m -->
+                                            <th class="py-3.5 px-3 text-right">
+                                                <div class="inline-flex items-center gap-1 bg-[#10192e] border border-white/10 rounded px-1.5 py-0.5 text-[10px] text-white font-bold">
+                                                    <span>📅</span> 5m (5个月)
+                                                </div>
+                                                <div class="text-[9px] text-cyber-textMuted font-normal mt-1 pr-1.5">回报 / 胜率 / 盈亏</div>
+                                            </th>
+                                            
+                                            <!-- 6m -->
+                                            <th class="py-3.5 px-3 text-right font-semibold">
+                                                <div class="inline-flex items-center gap-1 bg-[#10192e] border border-white/10 rounded px-1.5 py-0.5 text-[10px] text-white font-bold">
+                                                    <span>📅</span> 6m (6个月)
+                                                </div>
+                                                <div class="text-[9px] text-cyber-textMuted font-normal mt-1 pr-1.5">回报 / 胜率 / 盈亏</div>
+                                            </th>
+                                            
+                                            <th class="py-3 px-3 text-center">操作</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <!-- 全区间汇总行 (第一行汇总) -->
+                                        <tr v-if="overallSummary" class="border-b-2 border-cyber-primary/30 bg-cyber-primary/10 hover:bg-cyber-primary/15 transition-colors font-semibold">
+                                            <td class="py-3 px-3 font-bold text-cyber-primary font-mono">全区间汇总</td>
+                                            <td class="py-3 px-3 text-center font-mono font-bold text-cyber-primary">{{ overallSummary.count }} 只</td>
+                                            
+                                            <!-- 1m (1个月) -->
+                                            <td class="py-3 px-3 text-right font-mono space-y-0.5">
+                                                <div class="font-bold text-white">{{ overallSummary['1m_ret'] !== null ? overallSummary['1m_ret'].toFixed(2) + '%' : '-' }}</div>
+                                                <div class="text-[10px] text-cyber-textMuted font-medium">({{ overallSummary['1m_win'] !== null ? overallSummary['1m_win'].toFixed(0) + '%' : '-' }})</div>
+                                                <div :class="['text-[10px] font-semibold', overallSummary['1m_pl'] >= 0 ? 'text-cyber-up' : 'text-cyber-down']">
+                                                    {{ overallSummary['1m_pl'] >= 0 ? '+' : '' }}{{ overallSummary['1m_pl'] !== null ? overallSummary['1m_pl'].toLocaleString() + ' 元' : '-' }}
+                                                </div>
+                                            </td>
+                                            
+                                            <!-- 2m (2个月) -->
+                                            <td class="py-3 px-3 text-right font-mono space-y-0.5">
+                                                <div class="font-bold text-white">{{ overallSummary['2m_ret'] !== null ? overallSummary['2m_ret'].toFixed(2) + '%' : '-' }}</div>
+                                                <div class="text-[10px] text-cyber-textMuted font-medium">({{ overallSummary['2m_win'] !== null ? overallSummary['2m_win'].toFixed(0) + '%' : '-' }})</div>
+                                                <div :class="['text-[10px] font-semibold', overallSummary['2m_pl'] >= 0 ? 'text-cyber-up' : 'text-cyber-down']">
+                                                    {{ overallSummary['2m_pl'] >= 0 ? '+' : '' }}{{ overallSummary['2m_pl'] !== null ? overallSummary['2m_pl'].toLocaleString() + ' 元' : '-' }}
+                                                </div>
+                                            </td>
+                                            
+                                            <!-- 3m (3个月) -->
+                                            <td class="py-3 px-3 text-right font-mono text-cyber-primary space-y-0.5 bg-cyber-primary/8 border-x border-cyber-primary/25">
+                                                <div class="font-bold text-cyber-primary">{{ overallSummary['3m_ret'] !== null ? overallSummary['3m_ret'].toFixed(2) + '%' : '-' }}</div>
+                                                <div class="text-[10px] text-cyber-primary/75 font-medium">({{ overallSummary['3m_win'] !== null ? overallSummary['3m_win'].toFixed(0) + '%' : '-' }})</div>
+                                                <div :class="['text-[10px] font-semibold', overallSummary['3m_pl'] >= 0 ? 'text-cyber-up' : 'text-cyber-down']">
+                                                    {{ overallSummary['3m_pl'] >= 0 ? '+' : '' }}{{ overallSummary['3m_pl'] !== null ? overallSummary['3m_pl'].toLocaleString() + ' 元' : '-' }}
+                                                </div>
+                                            </td>
+                                            
+                                            <!-- 4m (4个月) -->
+                                            <td class="py-3 px-3 text-right font-mono space-y-0.5">
+                                                <div class="font-bold text-white">{{ overallSummary['4m_ret'] !== null ? overallSummary['4m_ret'].toFixed(2) + '%' : '-' }}</div>
+                                                <div class="text-[10px] text-cyber-textMuted font-medium">({{ overallSummary['4m_win'] !== null ? overallSummary['4m_win'].toFixed(0) + '%' : '-' }})</div>
+                                                <div :class="['text-[10px] font-semibold', overallSummary['4m_pl'] >= 0 ? 'text-cyber-up' : 'text-cyber-down']">
+                                                    {{ overallSummary['4m_pl'] >= 0 ? '+' : '' }}{{ overallSummary['4m_pl'] !== null ? overallSummary['4m_pl'].toLocaleString() + ' 元' : '-' }}
+                                                </div>
+                                            </td>
+                                            
+                                            <!-- 5m (5个月) -->
+                                            <td class="py-3 px-3 text-right font-mono space-y-0.5">
+                                                <div class="font-bold text-white">{{ overallSummary['5m_ret'] !== null ? overallSummary['5m_ret'].toFixed(2) + '%' : '-' }}</div>
+                                                <div class="text-[10px] text-cyber-textMuted font-medium">({{ overallSummary['5m_win'] !== null ? overallSummary['5m_win'].toFixed(0) + '%' : '-' }})</div>
+                                                <div :class="['text-[10px] font-semibold', overallSummary['5m_pl'] >= 0 ? 'text-cyber-up' : 'text-cyber-down']">
+                                                    {{ overallSummary['5m_pl'] >= 0 ? '+' : '' }}{{ overallSummary['5m_pl'] !== null ? overallSummary['5m_pl'].toLocaleString() + ' 元' : '-' }}
+                                                </div>
+                                            </td>
+                                            
+                                            <!-- 6m (6个月) -->
+                                            <td class="py-3 px-3 text-right font-mono space-y-0.5">
+                                                <div class="font-bold text-white">{{ overallSummary['6m_ret'] !== null ? overallSummary['6m_ret'].toFixed(2) + '%' : '-' }}</div>
+                                                <div class="text-[10px] text-cyber-textMuted font-medium">({{ overallSummary['6m_win'] !== null ? overallSummary['6m_win'].toFixed(0) + '%' : '-' }})</div>
+                                                <div :class="['text-[10px] font-semibold', overallSummary['6m_pl'] >= 0 ? 'text-cyber-up' : 'text-cyber-down']">
+                                                    {{ overallSummary['6m_pl'] >= 0 ? '+' : '' }}{{ overallSummary['6m_pl'] !== null ? overallSummary['6m_pl'].toLocaleString() + ' 元' : '-' }}
+                                                </div>
+                                            </td>
+                                            
+                                            <td class="py-3 px-3 text-center">
+                                                <span class="text-cyber-textMuted text-[10px]">-</span>
+                                            </td>
+                                        </tr>
+                                        <tr v-for="m in abVolumeResult.monthly_summary" :key="m.month" :class="['border-b border-white/2 hover:bg-white/2 transition-colors cursor-pointer', selectedMonth === m.month ? 'bg-cyber-primary/5' : '']" @click="selectMonth(m.month)">
+                                            <td class="py-3 px-3 font-bold text-white font-mono">{{ m.month }}</td>
+                                            <td class="py-3 px-3 text-center font-mono font-semibold">{{ m.count }} 只</td>
+                                            
+                                            <!-- 1m (1个月) -->
+                                            <td class="py-3 px-3 text-right font-mono space-y-0.5">
+                                                <div class="font-bold text-white">{{ m['1m_ret'] !== null ? m['1m_ret'].toFixed(2) + '%' : '-' }}</div>
+                                                <div class="text-[10px] text-cyber-textMuted">({{ m['1m_win'] !== null ? m['1m_win'].toFixed(0) + '%' : '-' }})</div>
+                                                <div :class="['text-[10px] font-semibold', m['1m_pl'] >= 0 ? 'text-cyber-up' : 'text-cyber-down']">
+                                                    {{ m['1m_pl'] >= 0 ? '+' : '' }}{{ m['1m_pl'] !== null ? m['1m_pl'].toLocaleString() + ' 元' : '-' }}
+                                                </div>
+                                            </td>
+                                            
+                                            <!-- 2m (2个月) -->
+                                            <td class="py-3 px-3 text-right font-mono space-y-0.5">
+                                                <div class="font-bold text-white">{{ m['2m_ret'] !== null ? m['2m_ret'].toFixed(2) + '%' : '-' }}</div>
+                                                <div class="text-[10px] text-cyber-textMuted">({{ m['2m_win'] !== null ? m['2m_win'].toFixed(0) + '%' : '-' }})</div>
+                                                <div :class="['text-[10px] font-semibold', m['2m_pl'] >= 0 ? 'text-cyber-up' : 'text-cyber-down']">
+                                                    {{ m['2m_pl'] >= 0 ? '+' : '' }}{{ m['2m_pl'] !== null ? m['2m_pl'].toLocaleString() + ' 元' : '-' }}
+                                                </div>
+                                            </td>
+                                            
+                                            <!-- 3m (3个月) -->
+                                            <td class="py-3 px-3 text-right font-mono text-cyber-primary space-y-0.5 bg-cyber-primary/2 border-x border-cyber-primary/10">
+                                                <div class="font-bold text-cyber-primary">{{ m['3m_ret'] !== null ? m['3m_ret'].toFixed(2) + '%' : '-' }}</div>
+                                                <div class="text-[10px] text-cyber-primary/70">({{ m['3m_win'] !== null ? m['3m_win'].toFixed(0) + '%' : '-' }})</div>
+                                                <div :class="['text-[10px] font-semibold', m['3m_pl'] >= 0 ? 'text-cyber-up' : 'text-cyber-down']">
+                                                    {{ m['3m_pl'] >= 0 ? '+' : '' }}{{ m['3m_pl'] !== null ? m['3m_pl'].toLocaleString() + ' 元' : '-' }}
+                                                </div>
+                                            </td>
+                                            
+                                            <!-- 4m (4个月) -->
+                                            <td class="py-3 px-3 text-right font-mono space-y-0.5">
+                                                <div class="font-bold text-white">{{ m['4m_ret'] !== null ? m['4m_ret'].toFixed(2) + '%' : '-' }}</div>
+                                                <div class="text-[10px] text-cyber-textMuted">({{ m['4m_win'] !== null ? m['4m_win'].toFixed(0) + '%' : '-' }})</div>
+                                                <div :class="['text-[10px] font-semibold', m['4m_pl'] >= 0 ? 'text-cyber-up' : 'text-cyber-down']">
+                                                    {{ m['4m_pl'] >= 0 ? '+' : '' }}{{ m['4m_pl'] !== null ? m['4m_pl'].toLocaleString() + ' 元' : '-' }}
+                                                </div>
+                                            </td>
+                                            
+                                            <!-- 5m (5个月) -->
+                                            <td class="py-3 px-3 text-right font-mono space-y-0.5">
+                                                <div class="font-bold text-white">{{ m['5m_ret'] !== null ? m['5m_ret'].toFixed(2) + '%' : '-' }}</div>
+                                                <div class="text-[10px] text-cyber-textMuted">({{ m['5m_win'] !== null ? m['5m_win'].toFixed(0) + '%' : '-' }})</div>
+                                                <div :class="['text-[10px] font-semibold', m['5m_pl'] >= 0 ? 'text-cyber-up' : 'text-cyber-down']">
+                                                    {{ m['5m_pl'] >= 0 ? '+' : '' }}{{ m['5m_pl'] !== null ? m['5m_pl'].toLocaleString() + ' 元' : '-' }}
+                                                </div>
+                                            </td>
+                                            
+                                            <!-- 6m (6个月) -->
+                                            <td class="py-3 px-3 text-right font-mono space-y-0.5">
+                                                <div class="font-bold text-white">{{ m['6m_ret'] !== null ? m['6m_ret'].toFixed(2) + '%' : '-' }}</div>
+                                                <div class="text-[10px] text-cyber-textMuted">({{ m['6m_win'] !== null ? m['6m_win'].toFixed(0) + '%' : '-' }})</div>
+                                                <div :class="['text-[10px] font-semibold', m['6m_pl'] >= 0 ? 'text-cyber-up' : 'text-cyber-down']">
+                                                    {{ m['6m_pl'] >= 0 ? '+' : '' }}{{ m['6m_pl'] !== null ? m['6m_pl'].toLocaleString() + ' 元' : '-' }}
+                                                </div>
+                                            </td>
+                                            
+                                            <td class="py-3 px-3 text-center">
+                                                <button class="bg-cyber-primary/10 border border-cyber-primary/30 text-cyber-primary px-2 py-1 rounded text-[10px] hover:bg-cyber-primary/20">查看个股</button>
+                                            </td>
+                                        </tr>
+                                        <tr v-if="!abVolumeResult.monthly_summary || abVolumeResult.monthly_summary.length === 0">
+                                            <td colspan="9" class="text-center py-16 text-cyber-textMuted text-xs leading-loose">
+                                                暂无回测结果。请在左侧设定参数后点击“运行策略全回测对账”按钮！
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Monthly Detailed Grid -->
+                    <div v-if="selectedMonth" class="grid grid-cols-1 lg:grid-cols-5 gap-8">
+                        <!-- Left Cap Classification stats (2/5 width) -->
+                        <div class="glass-card rounded-2xl p-6 lg:col-span-2 space-y-4">
+                            <div class="text-xs font-bold border-b border-white/5 pb-2.5 flex items-center gap-1.5 text-cyber-accent">
+                                <span>🏆</span> {{ selectedMonth }} 流通市值绩效分层明细
+                            </div>
+                            <div class="overflow-x-auto rounded-xl border border-cyber-border/40">
+                                <table class="w-full text-left text-xs border-collapse">
+                                    <thead>
+                                        <tr class="bg-cyber-card text-[10px] text-cyber-textMuted font-mono border-b border-cyber-border">
+                                            <th class="py-2 px-2.5">市值分类</th>
+                                            <th class="py-2 px-2.5 text-center">样本</th>
+                                            <th class="py-2 px-2.5 text-right">3m回报</th>
+                                            <th class="py-2 px-2.5 text-right">3m胜率</th>
+                                            <th class="py-2 px-2.5 text-right">累计盈亏</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr v-for="c in selectedMonthStats?.mcap_stats" :key="c.mcap_class" class="border-b border-white/2 text-[11px]">
+                                            <td class="py-2.5 px-2.5 font-bold text-white">{{ c.mcap_class }}</td>
+                                            <td class="py-2.5 px-2.5 text-center font-mono">{{ c.count }} 只</td>
+                                            <td class="py-2.5 px-2.5 text-right font-mono font-bold text-cyber-primary">{{ c['3m_ret'] !== null ? c['3m_ret'].toFixed(2) + '%' : '-' }}</td>
+                                            <td class="py-2.5 px-2.5 text-right font-mono text-cyber-textMuted">{{ c['3m_win'] !== null ? c['3m_win'].toFixed(0) + '%' : '-' }}</td>
+                                            <td :class="['py-2.5 px-2.5 text-right font-mono font-bold', c['3m_pl'] >= 0 ? 'text-cyber-up' : 'text-cyber-down']">
+                                                {{ c['3m_pl'] >= 0 ? '+' : '' }}{{ c['3m_pl'] !== null ? c['3m_pl'].toLocaleString() + ' 元' : '-' }}
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                            <div class="text-[10px] text-cyber-textMuted leading-relaxed bg-cyber-primary/5 border border-cyber-primary/20 p-3 rounded-lg">
+                                💡 <b>双击/单击表格中的月份</b> 即可极速查看该月份个股建仓股数、耗资与持仓1~6个月的详细平仓盈亏！
+                            </div>
+                        </div>
+
+                        <!-- Right Individual Trade logs (3/5 width) -->
+                        <div class="glass-card rounded-2xl p-6 lg:col-span-3 space-y-4">
+                            <div class="text-xs font-bold border-b border-white/5 pb-2.5 flex items-center justify-between text-cyber-primary">
+                                <span class="flex items-center justify-between w-full">
+                                    <span class="flex items-center gap-1.5">
+                                        <span>📂</span> {{ selectedMonth }} 个股交易挂单明细 (窄口径严格包含)
+                                    </span>
+                                    <span class="text-[10px] text-cyber-textMuted font-mono">
+                                        本月成交 {{ filteredTrades.length }} 只个股
+                                    </span>
+                                </span>
+                            </div>
+
+                            <div class="overflow-y-auto max-h-[500px] space-y-4 pr-1">
+                                <div v-for="(trade, idx) in filteredTrades" :key="trade.symbol" class="bg-cyber-card/30 border border-cyber-border/40 p-4 rounded-xl space-y-3">
+                                    <div class="flex items-center justify-between flex-wrap gap-2 text-xs border-b border-white/3 pb-2">
+                                        <div class="flex items-center gap-2">
+                                            <span class="bg-cyber-primary/20 text-cyber-primary font-bold px-2 py-0.5 rounded text-[10px] font-mono">[{{ idx+1 }}]</span>
+                                            <span class="font-bold text-white">{{ trade.symbol }}</span>
+                                            <span class="font-semibold text-cyber-textMuted">{{ trade.name }}</span>
+                                        </div>
+                                        <div class="flex gap-3 text-[10px] text-cyber-textMuted font-mono">
+                                            <span>市值: <b class="text-white">{{ trade.float_market_cap }} 亿</b> ({{ trade.mcap_class }})</span>
+                                            <span>挂单类型: <b class="text-cyber-primary">{{ trade.buy_type }}</b></span>
+                                        </div>
+                                    </div>
+
+                                    <div class="text-xs text-cyber-textMuted grid grid-cols-2 sm:grid-cols-4 gap-4 bg-[#0d1423]/40 p-3 rounded-lg border border-cyber-border/20">
+                                        <div>信号触发: <b class="text-white block font-mono mt-0.5">{{ trade.signal_date }}</b></div>
+                                        <div>昨收建仓: <b class="text-white block font-mono mt-0.5">{{ trade.buy_date }}</b></div>
+                                        <div>成交单价: <b class="text-cyber-primary block font-mono mt-0.5">{{ trade.buy_price }} 元</b></div>
+                                        <div>建仓股手: <b class="text-white block font-mono mt-0.5">{{ trade.buy_shares }} 股 ({{ trade.buy_shares/100 }}手)</b></div>
+                                        <div class="col-span-2 sm:col-span-4 border-t border-white/5 pt-2 flex justify-between items-center text-[10px]">
+                                            <span>实际建仓资金占用：<b class="text-white font-mono">{{ trade.actual_spend.toLocaleString() }} 元</b></span>
+                                        </div>
+                                    </div>
+
+                                    <div class="overflow-x-auto">
+                                        <table class="w-full text-left text-[11px] border-collapse">
+                                            <thead>
+                                                <tr class="text-[10px] text-cyber-textMuted font-mono border-b border-white/5">
+                                                    <th class="py-1 px-2">周期</th>
+                                                    <th class="py-1 px-2">平仓日期</th>
+                                                    <th class="py-1 px-2 text-right">平仓价</th>
+                                                    <th class="py-1 px-2 text-right">收益率</th>
+                                                    <th class="py-1 px-2 text-right">实盘盈亏</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                <tr v-for="h in ['1m', '2m', '3m', '6m']" :key="h" class="border-b border-white/2 hover:bg-white/2 transition-all font-mono">
+                                                    <td class="py-1.5 px-2 text-white font-sans">{{ h === '1m' ? '1个月(20日)' : (h === '2m' ? '2个月(40日)' : (h === '3m' ? '3个月(60日)' : '6个月(120日)')) }}</td>
+                                                    <td class="py-1.5 px-2 text-cyber-textMuted">{{ trade['exit_date_' + h] }}</td>
+                                                    <td class="py-1.5 px-2 text-right">{{ trade['exit_price_' + h] !== null ? trade['exit_price_' + h] + ' 元' : '-' }}</td>
+                                                    <td :class="['py-1.5 px-2 text-right font-bold', trade['ret_' + h] >= 0 ? 'text-cyber-up' : 'text-cyber-down']">
+                                                        {{ trade['ret_' + h] !== null ? (trade['ret_' + h] >= 0 ? '+' : '') + trade['ret_' + h].toFixed(2) + '%' : '-' }}
+                                                    </td>
+                                                    <td :class="['py-1.5 px-2 text-right font-bold', trade['pl_' + h] >= 0 ? 'text-cyber-up' : 'text-cyber-down']">
+                                                        {{ trade['pl_' + h] !== null ? (trade['pl_' + h] >= 0 ? '+' : '') + trade['pl_' + h].toLocaleString() + ' 元' : '-' }}
+                                                    </td>
+                                                </tr>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+            </div>
+
         </main>
     </div>
 
@@ -1602,6 +2333,114 @@
                 const backtestLoading = ref(false);
                 const backtestResult = ref(null);
                 const backtestError = ref("");
+
+                // 1.6. 月级异常放量 state
+                const selectedResearchStrategy = ref(null);
+                const abVolumeLoading = ref(false);
+                const abVolumeParams = ref({
+                    start_year: 2010,
+                    start_month: "01",
+                    end_year: 2010,
+                    end_month: "12",
+                    vol_ratio_threshold: 3.0,
+                    lookback_months: 12,
+                    abnormal_months_threshold: 2,
+                    listing_days_threshold: 390,
+                    capital: 100000.0,
+                    enable_market_filter: false,
+                    market_filter_index: "sh000852",
+                    market_filter_ma: 250,
+                    market_filter_rule: "above",
+                    market_filter_preset: "resonance",
+                    market_filter_slope_rule: "up",
+                    market_filter_position_rule: "above",
+                    market_filter_slope_days: 5,
+                    enable_stop_loss: false,
+                    stop_loss_pct: 10.0,
+                    enable_vol_position_filter: false,
+                    vol_position_multiplier: 1.3,
+                    hist_price_lower_mult: 0.7,
+                    enable_stock_trend_confirm: false,
+                    confirm_ma30_daily_slope_pos: false,
+                    confirm_above_ma30_daily: false,
+                    confirm_above_ma30_weekly: false,
+                    confirm_above_ma30_monthly: false
+                });
+                const yearsList = ref(Array.from({length: 2026 - 1990 + 1}, (_, i) => 1990 + i));
+                const monthsList = ref(Array.from({length: 12}, (_, i) => (i + 1).toString().padStart(2, '0')));
+                const abVolumeResult = ref({
+                    total_trades: 0,
+                    monthly_summary: [],
+                    trades: []
+                });
+                const selectedMonth = ref("");
+
+                const selectedMonthStats = computed(() => {
+                    if (!selectedMonth.value || !abVolumeResult.value.monthly_summary) return null;
+                    return abVolumeResult.value.monthly_summary.find(m => m.month === selectedMonth.value) || null;
+                });
+
+                const filteredTrades = computed(() => {
+                    if (!selectedMonth.value || !abVolumeResult.value.trades) return [];
+                    return abVolumeResult.value.trades.filter(t => t.signal_month === selectedMonth.value);
+                });
+
+                const overallSummary = computed(() => {
+                    if (!abVolumeResult.value || !abVolumeResult.value.trades || abVolumeResult.value.trades.length === 0) {
+                        return null;
+                    }
+                    const trades = abVolumeResult.value.trades;
+                    const total_count = trades.length;
+                    
+                    const summary = {
+                        month: "全区间汇总",
+                        count: total_count
+                    };
+                    
+                    for (const label of ['1m', '2m', '3m', '4m', '5m', '6m']) {
+                        const valid = trades.filter(t => t[`exit_date_${label}`] !== "数据不足");
+                        const v_cnt = valid.length;
+                        if (v_cnt > 0) {
+                            const avg_ret = valid.reduce((acc, t) => acc + t[`ret_${label}`], 0) / v_cnt;
+                            const win_rate = (valid.filter(t => t[`ret_${label}`] > 0).length / v_cnt) * 100;
+                            const total_pl = valid.reduce((acc, t) => acc + t[`pl_${label}`], 0);
+                            
+                            summary[`${label}_ret`] = avg_ret;
+                            summary[`${label}_win`] = win_rate;
+                            summary[`${label}_pl`] = total_pl;
+                        } else {
+                            summary[`${label}_ret`] = null;
+                            summary[`${label}_win`] = null;
+                            summary[`${label}_pl`] = null;
+                        }
+                    }
+                    return summary;
+                });
+
+                const activePresetDescription = computed(() => {
+                    const preset = abVolumeParams.value.market_filter_preset;
+                    const ma = abVolumeParams.value.market_filter_ma;
+                    if (preset === 'resonance') {
+                        return `强趋势共振锁：大势均线必须上行 (Slope > 0) 且 指数收盘价必须处于 MA${ma} 均线之上。是最稳健的顺势多头过滤。`;
+                    } else if (preset === 'pullback') {
+                        return `牛市黄金回踩锁：大势均线必须上行 (Slope > 0) 但 指数回调至 MA${ma} 均线之下。抓取大牛市中的高性价比黄金坑买点。`;
+                    } else if (preset === 'reversal') {
+                        return `逆势超跌反弹锁：大势均线处于下行通道 (Slope < 0) 且 指数处于 MA${ma} 均线之下。在熊市严重超跌时，搏击极端超跌反弹。`;
+                    } else {
+                        const slope_txt = abVolumeParams.value.market_filter_slope_rule === 'up' ? '📈均线上行' : (abVolumeParams.value.market_filter_slope_rule === 'down' ? '📉均线下行' : '↔️无斜率要求');
+                        const pos_txt = abVolumeParams.value.market_filter_position_rule === 'above' ? `指数在MA${ma}之上` : (abVolumeParams.value.market_filter_position_rule === 'below' ? `指数在MA${ma}之下` : '无位置要求');
+                        return `自定义高级过滤：${slope_txt} 且 ${pos_txt}。采样计算均线斜率窗口为 ${abVolumeParams.value.market_filter_slope_days} 天。`;
+                    }
+                });
+
+                const presetShieldColor = computed(() => {
+                    if (!abVolumeParams.value.enable_market_filter) return 'text-cyber-textMuted';
+                    const preset = abVolumeParams.value.market_filter_preset;
+                    if (preset === 'resonance') return 'text-cyber-primary';
+                    if (preset === 'pullback') return 'text-yellow-400';
+                    if (preset === 'reversal') return 'text-rose-500';
+                    return 'text-slate-400';
+                });
 
                 const stockStrategies = computed(() => {
                     const validKeys = [
@@ -2326,6 +3165,75 @@
                     } finally {
                         backtestLoading.value = false;
                     }
+                };
+
+                // 1.6. 月级异常放量 methods
+                const runAbnormalVolumeBacktest = async () => {
+                    abVolumeLoading.value = true;
+                    try {
+                        const getLastDayOfMonth = (year, month) => {
+                            return new Date(year, parseInt(month), 0).getDate();
+                        };
+                        const start_date = `${abVolumeParams.value.start_year}-${abVolumeParams.value.start_month.toString().padStart(2, '0')}-01`;
+                        const lastDay = getLastDayOfMonth(abVolumeParams.value.end_year, abVolumeParams.value.end_month);
+                        const end_date = `${abVolumeParams.value.end_year}-${abVolumeParams.value.end_month.toString().padStart(2, '0')}-${lastDay}`;
+                        
+                        const payload = {
+                            start_date: start_date,
+                            end_date: end_date,
+                            vol_ratio_threshold: parseFloat(abVolumeParams.value.vol_ratio_threshold),
+                            lookback_months: parseInt(abVolumeParams.value.lookback_months),
+                            abnormal_months_threshold: parseInt(abVolumeParams.value.abnormal_months_threshold),
+                            listing_days_threshold: parseInt(abVolumeParams.value.listing_days_threshold),
+                            capital: parseFloat(abVolumeParams.value.capital),
+                            enable_market_filter: abVolumeParams.value.enable_market_filter,
+                            market_filter_index: abVolumeParams.value.market_filter_index,
+                            market_filter_ma: parseInt(abVolumeParams.value.market_filter_ma),
+                            market_filter_rule: abVolumeParams.value.market_filter_rule,
+                            market_filter_preset: abVolumeParams.value.market_filter_preset,
+                            market_filter_slope_rule: abVolumeParams.value.market_filter_slope_rule,
+                            market_filter_position_rule: abVolumeParams.value.market_filter_position_rule,
+                            market_filter_slope_days: parseInt(abVolumeParams.value.market_filter_slope_days),
+                            enable_stop_loss: abVolumeParams.value.enable_stop_loss,
+                            stop_loss_pct: parseFloat(abVolumeParams.value.stop_loss_pct),
+                            enable_vol_position_filter: abVolumeParams.value.enable_vol_position_filter,
+                            vol_position_multiplier: parseFloat(abVolumeParams.value.vol_position_multiplier),
+                            hist_price_lower_mult: parseFloat(abVolumeParams.value.hist_price_lower_mult),
+                            enable_stock_trend_confirm: abVolumeParams.value.enable_stock_trend_confirm,
+                            confirm_ma30_daily_slope_pos: abVolumeParams.value.confirm_ma30_daily_slope_pos,
+                            confirm_above_ma30_daily: abVolumeParams.value.confirm_above_ma30_daily,
+                            confirm_above_ma30_weekly: abVolumeParams.value.confirm_above_ma30_weekly,
+                            confirm_above_ma30_monthly: abVolumeParams.value.confirm_above_ma30_monthly
+                        };
+
+                        const res = await fetch('/api/strategy/monthly_abnormal_volume/run', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                            },
+                            body: JSON.stringify(payload)
+                        });
+                        const data = await res.json();
+                        if (res.ok && data.status === 'success') {
+                            abVolumeResult.value = data;
+                            if (data.monthly_summary && data.monthly_summary.length > 0) {
+                                selectedMonth.value = data.monthly_summary[0].month;
+                            } else {
+                                selectedMonth.value = "";
+                            }
+                        } else {
+                            alert('回测运行失败: ' + (data.message || '未知错误'));
+                        }
+                    } catch (err) {
+                        console.error(err);
+                        alert('连接后端服务失败，请检查服务器是否正常运行！');
+                    } finally {
+                        abVolumeLoading.value = false;
+                    }
+                };
+
+                const selectMonth = (month) => {
+                    selectedMonth.value = month;
                 };
 
                 // 统一 Tab 切换，支持时序 ECharts 自适应重绘
@@ -3470,7 +4378,23 @@
                     // 游资雷达
                     lhbData,
                     loadLhbData,
-                    initLhbNetworkChart
+                    initLhbNetworkChart,
+
+                    // 月级异常放量
+                    selectedResearchStrategy,
+                    abVolumeLoading,
+                    abVolumeParams,
+                    abVolumeResult,
+                    selectedMonth,
+                    selectedMonthStats,
+                    filteredTrades,
+                    runAbnormalVolumeBacktest,
+                    selectMonth,
+                    yearsList,
+                    monthsList,
+                    activePresetDescription,
+                    presetShieldColor,
+                    overallSummary
                 };
             }
         }).mount("#app");
