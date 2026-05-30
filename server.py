@@ -3042,6 +3042,94 @@ def get_sector_flow(type: str = "industry", limit: int = 30):
     except Exception as e:
         return JSONResponse(status_code=500, content={"status": "error", "message": f"获取板块资金流向数据失败: {e}"})
 
+
+# -------------------------------------------------------------
+# 7.7b. 日内高频资金异动监测看板 API (GET)
+# -------------------------------------------------------------
+@app.get("/api/market/high_freq_factors", summary="获取个股日内高频微观结构资金流向异动因子排行")
+def get_market_high_freq_factors(date: str = None):
+    try:
+        # 1. 确定日期
+        factors_dir = os.path.join(CURRENT_DIR, "data", "factors")
+        if not os.path.exists(factors_dir):
+            return {"status": "success", "data": {"date": "", "morning_inflow": [], "afternoon_momentum": [], "realized_volatility": []}}
+            
+        available_files = [f for f in os.listdir(factors_dir) if f.startswith("high_freq_factors_") and f.endswith(".parquet")]
+        if not available_files:
+            return {"status": "success", "data": {"date": "", "morning_inflow": [], "afternoon_momentum": [], "realized_volatility": []}}
+            
+        # 排序找到最新的文件或指定日期的文件
+        available_files.sort()
+        target_file = available_files[-1]  # 默认最新的
+        if date:
+            formatted_date = date.replace("-", "")
+            match_file = f"high_freq_factors_{formatted_date}.parquet"
+            if match_file in available_files:
+                target_file = match_file
+                
+        # 提取文件中的实际日期 (如 2026-05-29)
+        date_raw = target_file.split("_")[-1].split(".")[0]
+        actual_date_str = f"{date_raw[:4]}-{date_raw[4:6]}-{date_raw[6:]}"
+        
+        filepath = os.path.join(factors_dir, target_file)
+        
+        con = duckdb.connect()
+        con.execute(f"SET threads = {os.cpu_count()}")
+        
+        # 只筛选正规个股，排除板块指数和国债逆回购代码
+        stock_filter = "(code LIKE 'sh60%' OR code LIKE 'sh68%' OR code LIKE 'sz00%' OR code LIKE 'sz30%' OR code LIKE 'bj92%' OR code LIKE 'bj83%')"
+        
+        # 加载股票名称字典以匹配中文名
+        tdx_dir = load_tdx_dir()
+        names_map = load_stock_names(tdx_dir)
+        
+        # A. 早盘抢筹排行榜 Top 10
+        morn_df = con.execute(f"""
+            SELECT code, realized_volatility, morning_inflow_ratio, afternoon_momentum, volume_entropy, total_volume, total_amount
+            FROM read_parquet('{filepath}')
+            WHERE {stock_filter} AND morning_inflow_ratio IS NOT NULL
+            ORDER BY morning_inflow_ratio DESC
+            LIMIT 10
+        """).fetchdf()
+        
+        # B. 尾盘博弈拉升排行榜 Top 10
+        aft_df = con.execute(f"""
+            SELECT code, realized_volatility, morning_inflow_ratio, afternoon_momentum, volume_entropy, total_volume, total_amount
+            FROM read_parquet('{filepath}')
+            WHERE {stock_filter} AND afternoon_momentum IS NOT NULL
+            ORDER BY afternoon_momentum DESC
+            LIMIT 10
+        """).fetchdf()
+        
+        # C. 日内剧烈物理波动排行榜 Top 10
+        vol_df = con.execute(f"""
+            SELECT code, realized_volatility, morning_inflow_ratio, afternoon_momentum, volume_entropy, total_volume, total_amount
+            FROM read_parquet('{filepath}')
+            WHERE {stock_filter} AND realized_volatility IS NOT NULL
+            ORDER BY realized_volatility DESC
+            LIMIT 10
+        """).fetchdf()
+        
+        # 封装带有中文名称的返回对象
+        def format_records(df):
+            records = df.to_dict(orient='records')
+            for r in records:
+                # 直接使用带市场前缀的代码进行查找，以正确拉取名称映射
+                r['name'] = names_map.get(r['code'], "未知个股")
+            return records
+            
+        return {
+            "status": "success",
+            "data": {
+                "date": actual_date_str,
+                "morning_inflow": format_records(morn_df),
+                "afternoon_momentum": format_records(aft_df),
+                "realized_volatility": format_records(vol_df)
+            }
+        }
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"status": "error", "message": f"加载日内高频异动因子失败: {e}"})
+
 # -------------------------------------------------------------
 # 7.8. 龙虎榜主力游资天团追踪与资金抱团图谱 API (GET)
 # -------------------------------------------------------------

@@ -851,6 +851,105 @@
                     </div>
                 </div>
 
+                <!-- 🧬 A股日内高频资金异动监测看板 -->
+                <div class="glass-card rounded-2xl p-6">
+                    <div class="flex justify-between items-center flex-wrap gap-4 border-b border-white/5 pb-4 mb-4">
+                        <div class="chart-title text-sm font-semibold flex items-center gap-2" style="border:none; margin:0; padding:0;">
+                            <span>🧬</span> A股日内高频资金异动监测看板 (高频因子排行)
+                        </div>
+                        <div class="text-[10px] text-cyber-textMuted bg-[#0d1423] border border-cyber-border/40 px-2.5 py-0.5 rounded-full font-mono flex items-center gap-1.5">
+                            <span class="inline-block w-1.5 h-1.5 rounded-full bg-cyber-primary animate-pulse"></span>
+                            数据截取日期: <span class="text-white font-bold">{{ highFreqFactors.date }}</span>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        <!-- 早盘主力抢筹榜 -->
+                        <div class="space-y-3 bg-[#0d1423]/40 p-4 border border-cyber-border/20 rounded-xl">
+                            <div class="text-xs font-bold text-cyber-primary border-b border-cyber-primary/20 pb-2 flex items-center justify-between">
+                                <span class="flex items-center gap-1">🔥 早盘强势抢筹前十</span>
+                                <span class="text-[10px] text-cyber-textMuted font-mono">Morning Inflow</span>
+                            </div>
+                            <div class="overflow-x-auto">
+                                <table class="w-full text-[11px] text-left">
+                                    <thead>
+                                        <tr class="text-cyber-textMuted border-b border-white/5">
+                                            <th class="pb-1.5">代码</th>
+                                            <th class="pb-1.5">股票名称</th>
+                                            <th class="pb-1.5 text-right">抢筹强度</th>
+                                            <th class="pb-1.5 text-right">成交额</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr v-for="(s, idx) in highFreqFactors.morning_inflow" :key="s.code" @click="switchTab('stock_analysis'); runStockAnalysis(s.code)" class="hover:bg-cyber-primary/10 transition-all cursor-pointer border-b border-white/2">
+                                            <td class="py-1.5 font-mono text-cyber-textMuted">{{ s.code }}</td>
+                                            <td class="py-1.5 font-bold text-white">{{ s.name }}</td>
+                                            <td class="py-1.5 text-right text-cyber-primary font-mono font-bold">{{ s.morning_inflow_ratio.toFixed(4) }}</td>
+                                            <td class="py-1.5 text-right font-mono text-cyber-textMuted">{{ (s.total_amount/1e8).toFixed(2) }}亿</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <!-- 尾盘拉升动量榜 -->
+                        <div class="space-y-3 bg-[#0d1423]/40 p-4 border border-cyber-border/20 rounded-xl">
+                            <div class="text-xs font-bold text-[#ec4899] border-b border-[#ec4899]/20 pb-2 flex items-center justify-between">
+                                <span class="flex items-center gap-1">🌌 尾盘动量喷发前十</span>
+                                <span class="text-[10px] text-cyber-textMuted font-mono">Afternoon Drift</span>
+                            </div>
+                            <div class="overflow-x-auto">
+                                <table class="w-full text-[11px] text-left">
+                                    <thead>
+                                        <tr class="text-cyber-textMuted border-b border-white/5">
+                                            <th class="pb-1.5">代码</th>
+                                            <th class="pb-1.5">股票名称</th>
+                                            <th class="pb-1.5 text-right">尾盘涨幅</th>
+                                            <th class="pb-1.5 text-right">成交额</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr v-for="(s, idx) in highFreqFactors.afternoon_momentum" :key="s.code" @click="switchTab('stock_analysis'); runStockAnalysis(s.code)" class="hover:bg-[#ec4899]/10 transition-all cursor-pointer border-b border-white/2">
+                                            <td class="py-1.5 font-mono text-cyber-textMuted">{{ s.code }}</td>
+                                            <td class="py-1.5 font-bold text-white">{{ s.name }}</td>
+                                            <td class="py-1.5 text-right text-[#ec4899] font-mono font-bold">{{ (s.afternoon_momentum*100).toFixed(2) }}%</td>
+                                            <td class="py-1.5 text-right font-mono text-cyber-textMuted">{{ (s.total_amount/1e8).toFixed(2) }}亿</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <!-- 日内物理波动榜 -->
+                        <div class="space-y-3 bg-[#0d1423]/40 p-4 border border-cyber-border/20 rounded-xl">
+                            <div class="text-xs font-bold text-yellow-500 border-b border-yellow-500/20 pb-2 flex items-center justify-between">
+                                <span class="flex items-center gap-1">⚡ 日内强幅波动前十</span>
+                                <span class="text-[10px] text-cyber-textMuted font-mono">Realized Vol</span>
+                            </div>
+                            <div class="overflow-x-auto">
+                                <table class="w-full text-[11px] text-left">
+                                    <thead>
+                                        <tr class="text-cyber-textMuted border-b border-white/5">
+                                            <th class="pb-1.5">代码</th>
+                                            <th class="pb-1.5">股票名称</th>
+                                            <th class="pb-1.5 text-right">实现波动率</th>
+                                            <th class="pb-1.5 text-right">成交额</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr v-for="(s, idx) in highFreqFactors.realized_volatility" :key="s.code" @click="switchTab('stock_analysis'); runStockAnalysis(s.code)" class="hover:bg-yellow-500/10 transition-all cursor-pointer border-b border-white/2">
+                                            <td class="py-1.5 font-mono text-cyber-textMuted">{{ s.code }}</td>
+                                            <td class="py-1.5 font-bold text-white">{{ s.name }}</td>
+                                            <td class="py-1.5 text-right text-yellow-500 font-mono font-bold">{{ (s.realized_volatility*100).toFixed(2) }}%</td>
+                                            <td class="py-1.5 text-right font-mono text-cyber-textMuted">{{ (s.total_amount/1e8).toFixed(2) }}亿</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+
                 <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
                     <!-- 概念板块及行业板块多头宽度表格并列 -->
                     <div class="glass-card rounded-2xl p-6 space-y-4">
@@ -2548,6 +2647,7 @@
                 const currentFlowMetric = ref("ratio");
                 const currentFlowLimit = ref(30);
                 const customFlowData = ref(null);
+                const highFreqFactors = ref({ date: "", morning_inflow: [], afternoon_momentum: [], realized_volatility: [] });
                 const expandedIndustries = ref({});
                 const expandedConcepts = ref({});
                 const toggleIndustry = (name) => {
@@ -4063,6 +4163,19 @@
                     }
                 };
 
+                const loadHighFreqFactors = async () => {
+                    try {
+                        const res = await fetch("/api/market/high_freq_factors");
+                        if (!res.ok) throw new Error("HTTP error");
+                        const result = await res.json();
+                        if (result.status === "success") {
+                            highFreqFactors.value = result.data;
+                        }
+                    } catch (e) {
+                        console.error("加载日内高频资金异动因子数据失败:", e);
+                    }
+                };
+
                 const forceRefreshOverview = async () => {
                     await loadMarketData(true);
                 };
@@ -4431,6 +4544,7 @@
                     await loadMarketData();
                     await loadStrategiesList();
                     await loadReportsList();
+                    loadHighFreqFactors();
                     if (!isOffline.value) {
                         runStockAnalysis(stockSearchSymbol.value);
                     }
@@ -4474,6 +4588,8 @@
                     currentFlowMetric,
                     currentFlowLimit,
                     customFlowData,
+                    highFreqFactors,
+                    loadHighFreqFactors,
                     fetchCustomFlowData,
                     switchFlowType,
                     switchFlowMetric,
