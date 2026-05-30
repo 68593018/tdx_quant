@@ -90,6 +90,34 @@ _MARKET_CACHE = {
     "signature": None
 }
 
+MARKET_CACHE_FILE = os.path.join(DATA_STORE_DIR, "market_data_cache.json")
+
+def load_market_cache_from_disk():
+    global _MARKET_CACHE
+    try:
+        if os.path.exists(MARKET_CACHE_FILE):
+            with open(MARKET_CACHE_FILE, "r", encoding="utf-8") as f:
+                cached = json.load(f)
+                if "signature" in cached and "data" in cached:
+                    _MARKET_CACHE["data"] = cached["data"]
+                    _MARKET_CACHE["signature"] = cached["signature"]
+                    print(f"✅ 成功从磁盘缓存加载大势数据 (签名: {cached['signature']})")
+    except Exception as e:
+        print(f"⚠️ 从磁盘加载缓存大势数据失败: {e}")
+
+def save_market_cache_to_disk(data, signature):
+    try:
+        os.makedirs(DATA_STORE_DIR, exist_ok=True)
+        with open(MARKET_CACHE_FILE, "w", encoding="utf-8") as f:
+            json.dump({"signature": signature, "data": data}, f, ensure_ascii=False, indent=2)
+        print(f"💾 成功将大势数据归档至磁盘缓存 (签名: {signature})")
+    except Exception as e:
+        print(f"⚠️ 写入大势数据磁盘缓存失败: {e}")
+
+# 模块加载时自动载入磁盘缓存
+load_market_cache_from_disk()
+
+
 def get_data_signature() -> float:
     """获取数据池极速特征签名，使用哨兵个股与目录修改时间，避免扫描数千个文件导致 WSL 磁盘 I/O 挂起"""
     try:
@@ -906,10 +934,18 @@ def get_market_data(refresh: bool = False):
     
     # 智能数据指纹指征，当 underlying 数据没有发生更新且没有强制刷新时，直接秒级返回缓存数据
     current_sig = get_data_signature()
-    if not refresh and _MARKET_CACHE["data"] is not None and _MARKET_CACHE["signature"] == current_sig:
-        cached_data = _MARKET_CACHE["data"].copy()
-        cached_data["is_cached"] = True
-        return cached_data
+    if not refresh and _MARKET_CACHE["data"] is not None and _MARKET_CACHE["signature"] is not None:
+        try:
+            if abs(float(_MARKET_CACHE["signature"]) - float(current_sig)) < 0.01:
+                cached_data = _MARKET_CACHE["data"].copy()
+                cached_data["is_cached"] = True
+                return cached_data
+        except Exception:
+            pass
+        if _MARKET_CACHE["signature"] == current_sig:
+            cached_data = _MARKET_CACHE["data"].copy()
+            cached_data["is_cached"] = True
+            return cached_data
 
     t_start = time.perf_counter()
     tdx_dir = load_tdx_dir()
@@ -1151,6 +1187,7 @@ def get_market_data(refresh: bool = False):
     # 写入缓存
     _MARKET_CACHE["data"] = full_data
     _MARKET_CACHE["signature"] = current_sig
+    save_market_cache_to_disk(full_data, current_sig)
     
     return full_data
 
@@ -4805,4 +4842,4 @@ if __name__ == "__main__":
     print("      通达信极速多因子量化选股平台 - Web 独立服务器启动 (B/S 架构底座)")
     print("=" * 80)
     # 本地局域网支持：监听 0.0.0.0 端口 8000
-    uvicorn.run("server:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("server:app", host="0.0.0.0", port=8000, reload=True, reload_excludes=["data/*", "report/*", "*.parquet", "*.md", "*.json"])
