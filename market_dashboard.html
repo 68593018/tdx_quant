@@ -529,7 +529,7 @@
                                 </tr>
                             </thead>
                             <tbody class="divide-y divide-white/2 bg-cyber-surface/10 text-xs">
-                                <tr v-for="(stk, index) in sortedStocks" :key="stk.symbol" class="hover:bg-white/2 transition-colors">
+                                <tr v-for="(stk, index) in sortedStocks" :key="stk.symbol" @click="switchTab('stock_analysis'); runStockAnalysis(stk.symbol)" class="hover:bg-cyber-primary/15 cursor-pointer transition-all duration-200">
                                     <td class="py-3.5 px-4 text-center text-cyber-textMuted font-mono">{{ index + 1 }}</td>
                                     <td class="py-3.5 px-4 font-mono font-bold text-white tracking-wide">{{ stk.symbol }}</td>
                                     <td class="py-3.5 px-4 font-semibold">{{ stk.name || '--' }}</td>
@@ -799,9 +799,20 @@
                 <div class="glass-card rounded-2xl p-6">
                     <div class="flex justify-between items-center flex-wrap gap-4 border-b border-white/5 pb-4 mb-4">
                         <div class="chart-title text-sm font-semibold flex items-center gap-2" style="border:none; margin:0; padding:0;">
-                            <span>🌊</span> 最近30个交易日板块资金流向时序图与领涨领跌曲线
+                            <span>🌊</span> 最近{{ currentFlowLimit }}个交易日板块资金流向时序图与领涨领跌曲线
                         </div>
                         <div class="flex gap-4 flex-wrap text-xs">
+                            <!-- 周期数选择器 -->
+                            <div class="flex items-center gap-1.5 bg-[#0d1423] px-2.5 py-1 border border-cyber-border rounded-lg text-cyber-textMuted">
+                                <span>📅 周期:</span>
+                                <select v-model="currentFlowLimit" @change="fetchCustomFlowData" class="bg-transparent text-white font-bold border-none focus:outline-none cursor-pointer">
+                                    <option value="30" class="bg-cyber-surface">最近30天</option>
+                                    <option value="60" class="bg-cyber-surface">最近60天</option>
+                                    <option value="90" class="bg-cyber-surface">最近90天</option>
+                                    <option value="120" class="bg-cyber-surface">最近120天</option>
+                                    <option value="240" class="bg-cyber-surface">最近240天</option>
+                                </select>
+                            </div>
                             <div class="flex gap-1 bg-[#0d1423] p-1 border border-cyber-border rounded-lg">
                                 <button @click="switchFlowType('industry')" :class="['px-3 py-1.5 rounded-md font-semibold transition-all', currentFlowType === 'industry' ? 'bg-cyber-primary/20 text-cyber-primary border border-cyber-primary/25' : 'text-cyber-textMuted']">行业板块</button>
                                 <button @click="switchFlowType('concept')" :class="['px-3 py-1.5 rounded-md font-semibold transition-all', currentFlowType === 'concept' ? 'bg-cyber-primary/20 text-cyber-primary border border-cyber-primary/25' : 'text-cyber-textMuted']">概念板块</button>
@@ -878,7 +889,7 @@
                                         <tr v-if="expandedIndustries[b.industry_name] && b.breakout_stocks?.length > 0">
                                             <td colspan="4" class="bg-cyber-card/20 p-4 rounded-xl border border-cyber-border/30">
                                                 <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[10px] text-cyber-textMuted font-mono">
-                                                    <div v-for="s in b.breakout_stocks" :key="s.symbol" class="bg-white/5 px-2.5 py-1.5 rounded flex justify-between hover:bg-cyber-primary/15 hover:text-white transition-all duration-200 border border-white/2">
+                                                    <div v-for="s in b.breakout_stocks" :key="s.symbol" @click="switchTab('stock_analysis'); runStockAnalysis(s.symbol)" class="bg-white/5 px-2.5 py-1.5 rounded flex justify-between hover:bg-cyber-primary/15 hover:text-white transition-all duration-200 border border-white/2 cursor-pointer">
                                                         <span class="text-white font-bold">{{ s.symbol }}</span>
                                                         <span class="text-cyber-primary">{{ s.name }}</span>
                                                     </div>
@@ -927,7 +938,7 @@
                                         <tr v-if="expandedConcepts[b.block_name] && b.breakout_stocks?.length > 0">
                                             <td colspan="4" class="bg-cyber-card/20 p-4 rounded-xl border border-cyber-border/30">
                                                 <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[10px] text-cyber-textMuted font-mono">
-                                                    <div v-for="s in b.breakout_stocks" :key="s.symbol" class="bg-white/5 px-2.5 py-1.5 rounded flex justify-between hover:bg-cyber-primary/15 hover:text-white transition-all duration-200 border border-white/2">
+                                                    <div v-for="s in b.breakout_stocks" :key="s.symbol" @click="switchTab('stock_analysis'); runStockAnalysis(s.symbol)" class="bg-white/5 px-2.5 py-1.5 rounded flex justify-between hover:bg-cyber-primary/15 hover:text-white transition-all duration-200 border border-white/2 cursor-pointer">
                                                         <span class="text-white font-bold">{{ s.symbol }}</span>
                                                         <span class="text-cyber-primary">{{ s.name }}</span>
                                                     </div>
@@ -2535,6 +2546,8 @@
                 const marketData = ref({});
                 const currentFlowType = ref("industry");
                 const currentFlowMetric = ref("ratio");
+                const currentFlowLimit = ref(30);
+                const customFlowData = ref(null);
                 const expandedIndustries = ref({});
                 const expandedConcepts = ref({});
                 const toggleIndustry = (name) => {
@@ -3446,7 +3459,7 @@
                         });
                     }
 
-                    const flowData = currentFlowType.value === "industry" ? marketData.value.industry_flow : marketData.value.concept_flow;
+                    const flowData = customFlowData.value ? customFlowData.value : (currentFlowType.value === "industry" ? marketData.value.industry_flow : marketData.value.concept_flow);
                     if (!flowData || !flowData.dates || flowData.dates.length === 0) {
                         return;
                     }
@@ -3534,7 +3547,7 @@
                         });
                     }
 
-                    const flowData = currentFlowType.value === "industry" ? marketData.value.industry_flow : marketData.value.concept_flow;
+                    const flowData = customFlowData.value ? customFlowData.value : (currentFlowType.value === "industry" ? marketData.value.industry_flow : marketData.value.concept_flow);
                     if (!flowData || !flowData.dates || flowData.dates.length === 0 || !flowData.series) {
                         return;
                     }
@@ -3764,7 +3777,7 @@
                         });
                     }
 
-                    const flowData = currentFlowType.value === "industry" ? marketData.value.industry_flow : marketData.value.concept_flow;
+                    const flowData = customFlowData.value ? customFlowData.value : (currentFlowType.value === "industry" ? marketData.value.industry_flow : marketData.value.concept_flow);
                     if (!flowData || !flowData.dates || flowData.dates.length === 0 || !flowData.series) {
                         return;
                     }
@@ -3985,9 +3998,37 @@
                     chartTurnoverInstance.setOption(option, true);
                 };
 
+                const fetchCustomFlowData = async () => {
+                    if (parseInt(currentFlowLimit.value) === 30) {
+                        customFlowData.value = null;
+                        initFlowChart();
+                        return;
+                    }
+                    const limit = currentFlowLimit.value;
+                    const type = currentFlowType.value;
+                    try {
+                        const res = await fetch(`/api/market/sector_flow?type=${type}&limit=${limit}`);
+                        if (!res.ok) {
+                            throw new Error("HTTP error");
+                        }
+                        const result = await res.json();
+                        if (result.status === "success") {
+                            customFlowData.value = result.data;
+                            initFlowChart();
+                        }
+                    } catch (e) {
+                        console.error("加载自定义板块资金流向数据失败:", e);
+                    }
+                };
+
                 const switchFlowType = (type) => {
                     currentFlowType.value = type;
-                    initFlowChart();
+                    if (parseInt(currentFlowLimit.value) !== 30) {
+                        fetchCustomFlowData();
+                    } else {
+                        customFlowData.value = null;
+                        initFlowChart();
+                    }
                 };
 
                 const switchFlowMetric = (metric) => {
@@ -4431,6 +4472,9 @@
                     forceRefreshOverview,
                     currentFlowType,
                     currentFlowMetric,
+                    currentFlowLimit,
+                    customFlowData,
+                    fetchCustomFlowData,
                     switchFlowType,
                     switchFlowMetric,
                     expandedIndustries,

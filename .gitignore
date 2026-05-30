@@ -18,3 +18,7 @@ __pycache__/
 
 # Scratch Scripts & Files
 scratch/
+
+# System Agent Cache
+.antigravitycli/
+*.log

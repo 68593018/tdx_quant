@@ -3003,6 +3003,45 @@ def optimize_stock_bias(symbol: str):
         "fingerprint": fingerprint_node
     }
 
+@app.get("/api/market/sector_flow", summary="获取指定周期的行业或概念板块资金流向时序图与领涨领跌曲线数据")
+def get_sector_flow(type: str = "industry", limit: int = 30):
+    if limit < 30:
+        limit = 30
+    elif limit > 240:
+        limit = 240
+        
+    try:
+        strategies = load_strategies()
+        patterns_str = get_parquet_patterns()
+        
+        con = duckdb.connect()
+        con.execute(f"SET threads = {os.cpu_count()}")
+        
+        default_stock_filter = "(filename LIKE '%sh60%' OR filename LIKE '%sh68%' OR filename LIKE '%sz00%' OR filename LIKE '%sz30%' OR filename LIKE '%/bj%')"
+        
+        if type == "industry":
+            sql = strategies["industry_flow_30d"]["query_sql"]\
+                .replace("__DATA_STORE_DIR__", DATA_STORE_DIR)\
+                .replace("__PATTERNS_STR__", patterns_str)\
+                .replace("__INDUSTRY_MAPPINGS_PATH__", INDUSTRY_MAPPINGS_PATH)\
+                .replace("__CATEGORY_FILTER__", default_stock_filter)\
+                .replace("LIMIT 30", f"LIMIT {limit}")
+            df = con.execute(sql).fetchdf()
+            res = process_flow_data(df, 'industry_name')
+        else:
+            sql = strategies["concept_flow_30d"]["query_sql"]\
+                .replace("__DATA_STORE_DIR__", DATA_STORE_DIR)\
+                .replace("__PATTERNS_STR__", patterns_str)\
+                .replace("__BLOCK_MAPPINGS_PATH__", BLOCK_MAPPINGS_PATH)\
+                .replace("__CATEGORY_FILTER__", default_stock_filter)\
+                .replace("LIMIT 30", f"LIMIT {limit}")
+            df = con.execute(sql).fetchdf()
+            res = process_flow_data(df, 'block_name')
+            
+        return {"status": "success", "data": res}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"status": "error", "message": f"获取板块资金流向数据失败: {e}"})
+
 # -------------------------------------------------------------
 # 7.8. 龙虎榜主力游资天团追踪与资金抱团图谱 API (GET)
 # -------------------------------------------------------------
