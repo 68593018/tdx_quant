@@ -59,6 +59,19 @@ except ImportError:
         print(f"❌ 自动安装 Pandas 失败，请手动安装。错误: {e}")
         sys.exit(1)
 
+try:
+    import requests
+except ImportError:
+    print("⏳ 检测到当前环境未安装 Requests 依赖，正在为您自动静默安装...")
+    try:
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "requests"],
+                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        import requests
+        print("✅ Requests 依赖自动安装成功！\n")
+    except Exception as e:
+        print(f"❌ 自动安装 Requests 失败，请手动安装。错误: {e}")
+        sys.exit(1)
+
 # -------------------------------------------------------------
 
 # 2. 路径配置与全局变量
@@ -78,16 +91,19 @@ _MARKET_CACHE = {
 }
 
 def get_data_signature() -> float:
-    """获取数据池文件的最新修改时间特征签名，用于智能缓存校验"""
+    """获取数据池极速特征签名，使用哨兵个股与目录修改时间，避免扫描数千个文件导致 WSL 磁盘 I/O 挂起"""
     try:
         if not os.path.exists(DATA_STORE_DIR):
             return 0.0
-        files = [os.path.join(DATA_STORE_DIR, f) for f in os.listdir(DATA_STORE_DIR) if f.endswith('.parquet')]
-        if not files:
-            return 0.0
-        return max(os.path.getmtime(f) for f in files)
+        # 哨兵股票：使用浦发银行 (sh600000) 作为市场更新的代表性特征指标
+        sentinel_path = os.path.join(DATA_STORE_DIR, "sh600000.parquet")
+        if os.path.exists(sentinel_path):
+            return os.path.getmtime(sentinel_path)
+        # 若哨兵股票不存在，回退到数据目录自身的修改时间
+        return os.path.getmtime(DATA_STORE_DIR)
     except Exception:
         return 0.0
+
 
 # 异步数据同步全局状态
 sync_task_status = {
@@ -101,13 +117,22 @@ sync_lock = threading.Lock()
 # 3. 核心工具与数据解析函数
 # -------------------------------------------------------------
 def load_tdx_dir() -> str:
-    """从 config.json 载入通达信路径"""
+    """从 config.json 载入通达信路径，若在 Linux/WSL 环境下则自动对 Windows 格式路径进行转换"""
     if os.path.exists(CONFIG_PATH):
         try:
             with open(CONFIG_PATH, "r", encoding="utf-8") as f:
                 config = json.load(f)
                 if "tdx_dir" in config:
-                    return config["tdx_dir"]
+                    path = config["tdx_dir"]
+                    # 若在 Linux/WSL 环境下，并且路径是 Windows 格式，自动转换为 WSL 挂载路径
+                    if sys.platform.startswith('linux') and (':' in path or '\\' in path):
+                        path = path.replace('\\', '/')
+                        match = re.match(r'^([a-zA-Z]):/(.*)', path)
+                        if match:
+                            drive = match.group(1).lower()
+                            subpath = match.group(2)
+                            path = f"/mnt/{drive}/{subpath}"
+                    return path
         except Exception:
             pass
     return "/mnt/e/Tools/tdx"
@@ -917,6 +942,8 @@ def get_market_data(refresh: bool = False):
     limit_up = int(row_temp['limit_up'])
     limit_down = int(row_temp['limit_down'])
     median_return = float(row_temp['median_return'])
+    rising_amount = float(row_temp['rising_amount']) if 'rising_amount' in row_temp and pd.notnull(row_temp['rising_amount']) else 0.0
+    falling_amount = float(row_temp['falling_amount']) if 'falling_amount' in row_temp and pd.notnull(row_temp['falling_amount']) else 0.0
     trade_date = row_temp['trade_date']
     if pd.notnull(trade_date) and hasattr(trade_date, 'strftime'):
         trade_date_str = trade_date.strftime('%Y-%m-%d')
@@ -1030,6 +1057,8 @@ def get_market_data(refresh: bool = False):
         "rising_count": rising_count,
         "falling_count": falling_count,
         "flat_count": flat_count,
+        "rising_amount": rising_amount,
+        "falling_amount": falling_amount,
         "dist": dist,
         "streak_counts": {str(k): v for k, v in sorted(streak_counts.items(), reverse=True)},
         "streaks": streaks_list,

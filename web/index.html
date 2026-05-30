@@ -222,15 +222,56 @@
                         <div class="chart-title text-sm font-semibold border-b border-white/5 pb-3 mb-6 flex items-center gap-2">
                             <span>📊</span> 沪深京全市场日涨跌幅多维分布
                         </div>
-                        <div class="space-y-4">
-                            <!-- 涨跌区间进度条 -->
-                            <div v-for="item in distLayout" :key="item.key" class="flex items-center gap-4 text-xs">
-                                <span class="w-24 text-cyber-textMuted text-right">{{ item.label }}</span>
-                                <div class="flex-1 h-3 bg-white/5 rounded-full overflow-hidden">
-                                    <div :class="['h-full rounded-full transition-all duration-500', item.isUp ? 'bg-cyber-up shadow-[0_0_10px_rgba(239,68,68,0.2)]' : 'bg-cyber-down shadow-[0_0_10px_rgba(16,185,129,0.2)]']"
-                                         :style="{ width: getDistPercentage(item.key) + '%' }"></div>
+                        <div class="grid grid-cols-1 gap-6">
+                            <!-- 上半部：上涨区间与总成交额 -->
+                            <div class="flex items-stretch gap-6">
+                                <!-- 左侧：5个上涨区间进度条 -->
+                                <div class="flex-1 space-y-3">
+                                    <div v-for="item in distLayout.slice(0, 5)" :key="item.key" class="flex items-center gap-4 text-xs">
+                                        <span class="w-20 text-cyber-textMuted text-right font-medium">{{ item.label }}</span>
+                                        <div class="flex-1 h-3 bg-white/5 rounded-full overflow-hidden">
+                                            <div class="h-full rounded-full transition-all duration-500 bg-cyber-up shadow-[0_0_10px_rgba(239,68,68,0.2)]"
+                                                 :style="{ width: getDistPercentage(item.key) + '%' }"></div>
+                                        </div>
+                                        <span class="w-12 font-semibold text-right text-cyber-up">{{ marketData.dist?.[item.key] }} 只</span>
+                                    </div>
                                 </div>
-                                <span class="w-12 font-semibold text-right">{{ marketData.dist?.[item.key] }} 只</span>
+                                <!-- 右侧：上涨总成交额框 -->
+                                <div class="w-36 bg-cyber-up/5 border border-cyber-up/15 rounded-xl p-3 flex flex-col justify-center items-center text-center relative overflow-hidden group hover:bg-cyber-up/10 hover:border-cyber-up/30 transition-all duration-300">
+                                    <div class="absolute inset-0 bg-gradient-to-tr from-cyber-up/5 to-transparent pointer-events-none"></div>
+                                    <div class="text-[9px] text-cyber-textMuted uppercase tracking-wider font-bold mb-1">上涨个股成交额</div>
+                                    <div class="text-sm font-extrabold font-outfit text-cyber-up leading-tight">
+                                        {{ formatLargeNumber(marketData.rising_amount) }}
+                                    </div>
+                                    <div class="absolute right-2 bottom-1 text-2xl opacity-[0.04] select-none pointer-events-none">📈</div>
+                                </div>
+                            </div>
+
+                            <!-- 中间分割线 -->
+                            <div class="border-t border-white/5 my-0.5"></div>
+
+                            <!-- 下半部：下跌区间与总成交额 -->
+                            <div class="flex items-stretch gap-6">
+                                <!-- 左侧：5个下跌区间进度条 -->
+                                <div class="flex-1 space-y-3">
+                                    <div v-for="item in distLayout.slice(5, 10)" :key="item.key" class="flex items-center gap-4 text-xs">
+                                        <span class="w-20 text-cyber-textMuted text-right font-medium">{{ item.label }}</span>
+                                        <div class="flex-1 h-3 bg-white/5 rounded-full overflow-hidden">
+                                            <div class="h-full rounded-full transition-all duration-500 bg-cyber-down shadow-[0_0_10px_rgba(16,185,129,0.2)]"
+                                                 :style="{ width: getDistPercentage(item.key) + '%' }"></div>
+                                        </div>
+                                        <span class="w-12 font-semibold text-right text-cyber-down">{{ marketData.dist?.[item.key] }} 只</span>
+                                    </div>
+                                </div>
+                                <!-- 右侧：下跌总成交额框 -->
+                                <div class="w-36 bg-cyber-down/5 border border-cyber-down/15 rounded-xl p-3 flex flex-col justify-center items-center text-center relative overflow-hidden group hover:bg-cyber-down/10 hover:border-cyber-down/30 transition-all duration-300">
+                                    <div class="absolute inset-0 bg-gradient-to-tr from-cyber-down/5 to-transparent pointer-events-none"></div>
+                                    <div class="text-[9px] text-cyber-textMuted uppercase tracking-wider font-bold mb-1">下跌个股成交额</div>
+                                    <div class="text-sm font-extrabold font-outfit text-cyber-down leading-tight">
+                                        {{ formatLargeNumber(marketData.falling_amount) }}
+                                    </div>
+                                    <div class="absolute right-2 bottom-1 text-2xl opacity-[0.04] select-none pointer-events-none">📉</div>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -241,13 +282,44 @@
                             <span>🪜</span> 最新活跃短线连板投机情绪梯队
                         </div>
                         <div class="space-y-6">
-                            <div v-for="(stocks, streak) in streaksGroup" :key="streak" class="flex flex-col gap-2">
-                                <div class="flex items-center justify-between text-xs">
-                                    <span class="bg-gradient-to-r from-cyber-accent to-cyber-secondary px-2.5 py-1 rounded text-white font-bold font-outfit">{{ streak }} 连板</span>
+                            <div v-for="(stocks, streak) in streaksGroup" :key="streak" class="flex flex-col gap-3">
+                                <div class="flex items-center justify-between text-xs border-b border-white/5 pb-1">
+                                    <span class="bg-gradient-to-r from-cyber-accent to-cyber-secondary px-2.5 py-1 rounded text-white font-bold font-outfit shadow-sm">{{ streak }} 连板</span>
                                     <span class="text-cyber-textMuted font-semibold">{{ stocks.length }} 只个股</span>
                                 </div>
-                                <div class="text-sm font-semibold text-cyber-primary bg-cyber-card/60 p-3 rounded-lg border border-cyber-border/40 leading-relaxed">
-                                    {{ stocks.join(', ') }}
+                                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                    <div v-for="stock in stocks" :key="stock.symbol" 
+                                         @click="switchTab('stock_analysis'); runStockAnalysis(stock.symbol)"
+                                         class="bg-cyber-card/45 hover:bg-cyber-card/85 p-3 rounded-xl border border-cyber-border hover:border-cyber-primary/45 transition-all duration-300 cursor-pointer flex flex-col gap-1.5 group relative overflow-hidden">
+                                        
+                                        <!-- 背景微光微动效果 -->
+                                        <div class="absolute inset-0 bg-gradient-to-r from-cyber-primary/5 to-cyber-accent/5 opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none"></div>
+                                        
+                                        <!-- 第一行：名称与代码 -->
+                                        <div class="flex items-center justify-between relative z-10">
+                                            <span class="font-bold text-white group-hover:text-cyber-primary transition-colors flex items-center gap-1.5 text-xs">
+                                                {{ stock.name === '未知个股' ? stock.symbol : stock.name }}
+                                                <span class="text-[10px] text-cyber-textMuted font-mono font-normal">({{ stock.symbol }})</span>
+                                            </span>
+                                            <span class="text-[9px] px-1.5 py-0.5 rounded bg-cyber-up/10 text-cyber-up border border-cyber-up/25 font-bold font-mono">
+                                                涨停
+                                            </span>
+                                        </div>
+                                        
+                                        <!-- 第二行：涨停原因 -->
+                                        <div class="text-[11px] text-amber-400/90 leading-relaxed font-sans relative z-10 flex items-start gap-1">
+                                            <span class="shrink-0 text-amber-400/70">💡</span>
+                                            <span>{{ stock.reason }}</span>
+                                        </div>
+                                        
+                                        <!-- 第三行：概念板块标签 -->
+                                        <div v-if="stock.concepts && stock.concepts.length > 0" class="flex flex-wrap gap-1 relative z-10 mt-1">
+                                            <span v-for="c in stock.concepts" :key="c" 
+                                                  class="text-[9px] px-2 py-0.5 rounded bg-cyber-secondary/15 text-cyber-secondary border border-cyber-secondary/20">
+                                                {{ c }}
+                                            </span>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                             <div v-if="Object.keys(streaksGroup).length === 0" class="text-center py-12 text-cyber-textMuted text-xs">
@@ -3286,16 +3358,48 @@
                     return maxCount > 0 ? (marketData.value.dist[key] * 100.0 / maxCount) : 0;
                 };
 
-                // 连板梯队分组计算属性
+                // 连板梯队分组计算属性 (带涨停原因与概念平铺版)
                 const streaksGroup = computed(() => {
                     const group = {};
-                    if (!marketData.value.streaks) return group;
-                    marketData.value.streaks.forEach(s => {
-                        group[s.streak] = group[s.streak] || [];
-                        const disp = s.name ? `${s.symbol}(${s.name})` : s.symbol;
-                        group[s.streak].push(disp);
-                    });
-                    return group;
+                    
+                    // 1. 如果后端有 limit_up_analysis，则使用深度解析数据
+                    if (marketData.value.limit_up_analysis && marketData.value.limit_up_analysis.length > 0) {
+                        marketData.value.limit_up_analysis.forEach(item => {
+                            const streak = item.streak || 1;
+                            group[streak] = group[streak] || [];
+                            group[streak].push({
+                                symbol: item.symbol,
+                                name: item.name || '未知个股',
+                                streak: streak,
+                                reason: item.reason || '今日首板封板或短线热点轮动',
+                                concepts: item.concepts || []
+                            });
+                        });
+                    } 
+                    // 2. 如果只有普通的 streaks，说明是旧版/单机/回测缓存数据，作优雅退化处理
+                    else if (marketData.value.streaks) {
+                        marketData.value.streaks.forEach(s => {
+                            group[s.streak] = group[s.streak] || [];
+                            group[s.streak].push({
+                                symbol: s.symbol,
+                                name: s.name || '未知个股',
+                                streak: s.streak,
+                                reason: '短线投机活跃资金封板',
+                                concepts: []
+                            });
+                        });
+                    }
+                    
+                    // 为了让梯队从高到低排列，我们对 key 做降序排序
+                    const sortedGroup = {};
+                    Object.keys(group)
+                        .map(Number)
+                        .sort((a, b) => b - a)
+                        .forEach(streak => {
+                            sortedGroup[streak] = group[streak];
+                        });
+                        
+                    return sortedGroup;
                 });
 
                 // 排序相关计算属性与方法
