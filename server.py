@@ -755,17 +755,16 @@ def fetch_eastmoney_limit_up_reasons() -> dict:
 
 def get_limit_up_reasons_analysis(df_streaks, con, names_map) -> list:
     """
-    计算并解析当日所有涨停个股的原因，整合东财实时原因与本地量化概念共振归因。
+    计算并解析当日所有涨停个股的原因，整合本地量化概念共振归因与实时个股新闻消息面深度归因。
     """
     if df_streaks.empty:
         return []
         
     import pandas as pd
+    import re
+    from concurrent.futures import ThreadPoolExecutor, as_completed
     
-    # 1. 尝试从东财拉取实时解析
-    em_reasons = fetch_eastmoney_limit_up_reasons()
-    
-    # 2. 本地量化概念归因计算
+    # 1. 本地量化概念归因计算
     streaks_list = df_streaks.to_dict('records')
     
     stock_concepts = {}
@@ -790,35 +789,112 @@ def get_limit_up_reasons_analysis(df_streaks, con, names_map) -> list:
             stock_concepts[sym] = concepts
             for c in concepts:
                 concept_counts[c] = concept_counts.get(c, 0) + 1
+
+    # 2. 定义高精度消息面催化提取函数
+    def extract_news_catalyst(content: str) -> str:
+        if not content:
+            return ""
+        # 匹配 "消息面上，..." 或 "消息面，..." 等
+        match = re.search(r'(消息面[上]?[：，,][^。；\n\r]{10,150}[。；]?)', content)
+        if match:
+            return match.group(1).strip()
+        # 如果没找到，也可以宽泛一点，匹配 "受...影响" 或 "因...走强"
+        match2 = re.search(r'((?:受|因)[^。；\n\r]{10,100}(?:影响|刺激|推动|消息|拉升|走强)[^。；\n\r]{0,30}[。；]?)', content)
+        if match2:
+            return match2.group(1).strip()
+        return ""
+
+    # 3. 定义单个个股极速新闻拉取任务
+    def fetch_single_stock_news(sym, name):
+        try:
+            import akshare as ak
+            # 优先使用股票简称搜索，这样更精准
+            df = ak.stock_news_em(symbol=name)
+            if df.empty:
+                # 如果用简称没搜到，用代码搜索
+                code_only = sym[2:] if len(sym) == 8 else sym
+                df = ak.stock_news_em(symbol=code_only)
+            if not df.empty:
+                return df
+        except Exception:
+            pass
+        return None
+
+    # 4. 并发拉取所有涨停股票的最新舆情新闻数据 (限制并发线程数为10，平滑网络抖动)
+    stock_news_map = {}
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        futures = {}
+        for item in streaks_list:
+            sym_lower = item['symbol'].lower()
+            name = names_map.get(sym_lower, "未知个股")
+            futures[executor.submit(fetch_single_stock_news, sym_lower, name)] = sym_lower
+            
+        for future in as_completed(futures):
+            sym_lower = futures[future]
+            try:
+                df_news = future.result()
+                if df_news is not None and not df_news.empty:
+                    stock_news_map[sym_lower] = df_news
+            except Exception:
+                pass
                 
+    # 5. 缝合归纳最终涨停原因（概念共振 + 消息面深度归因）
     parsed_results = []
     for item in streaks_list:
         sym = item['symbol'].lower()
         streak = int(item['streak'])
         name = names_map.get(sym, "未知个股")
         
-        reason = ""
-        if sym in em_reasons:
-            reason = em_reasons[sym]['reason']
-            name = em_reasons[sym].get('name', name)
+        # 概念组装
+        concepts = stock_concepts.get(sym, [])
+        concepts_str = " + ".join(concepts[:2]) if concepts else ""
+        
+        # 消息面解析
+        news_reason = ""
+        df_news = stock_news_map.get(sym)
+        if df_news is not None and not df_news.empty:
+            # 遍历最新 8 条新闻，寻找含有消息面原因的内容
+            for idx, row in df_news.head(8).iterrows():
+                title = str(row['新闻标题'])
+                content = str(row['新闻内容'])
+                cat = extract_news_catalyst(content)
+                if cat:
+                    if len(cat) > 130:
+                        cat = cat[:130] + "..."
+                    news_reason = cat
+                    break
             
-        if not reason:
-            concepts = stock_concepts.get(sym, [])
-            if concepts:
-                # 寻找今日涨停数最多的概念
-                concepts.sort(key=lambda c: concept_counts.get(c, 0), reverse=True)
-                lead_concept = concepts[0]
-                lead_cnt = concept_counts[lead_concept]
-                reason = f"概念共振: {lead_concept} (板块内共 {lead_cnt} 只涨停)"
-            else:
-                reason = "短线活跃资金封板"
+            # 如果没有提取到特定消息面，但有新闻，则采用最新标题
+            if not news_reason:
+                latest_title = str(df_news.iloc[0]['新闻标题'])
+                if len(latest_title) > 60:
+                    latest_title = latest_title[:60] + "..."
+                # 过滤掉 "连收x个涨停板" 这种无营养标题，查看第2条新闻
+                if "连收" in latest_title and "涨停板" in latest_title and len(df_news) > 1:
+                    latest_title = str(df_news.iloc[1]['新闻标题'])
+                    if len(latest_title) > 60:
+                        latest_title = latest_title[:60] + "..."
+                news_reason = f"相关报道：{latest_title}"
                 
+        # 缝合逻辑
+        if concepts_str and news_reason:
+            reason = f"【{concepts_str}】{news_reason}"
+        elif news_reason:
+            reason = news_reason
+        elif concepts_str:
+            concepts.sort(key=lambda c: concept_counts.get(c, 0), reverse=True)
+            lead_concept = concepts[0]
+            lead_cnt = concept_counts[lead_concept]
+            reason = f"概念共振: {lead_concept} (板块内共 {lead_cnt} 只涨停)"
+        else:
+            reason = "短线活跃资金封板，暂无消息面催化"
+            
         parsed_results.append({
             "symbol": sym.upper(),
             "name": name,
             "streak": streak,
             "reason": reason,
-            "concepts": stock_concepts.get(sym, [])[:3]
+            "concepts": concepts[:3]
         })
         
     parsed_results.sort(key=lambda x: (-x['streak'], x['symbol']))

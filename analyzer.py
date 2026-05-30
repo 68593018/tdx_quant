@@ -127,16 +127,26 @@ def process_flow_data(df, name_col) -> dict:
     }
 
 def load_tdx_dir() -> str:
-    """从 config.json 配置文件中载入通达信安装路径，规避硬编码"""
+    """从 config.json 配置文件中载入通达信安装路径，若在 Linux/WSL 环境下则自动对 Windows 格式路径进行转换"""
     if os.path.exists(CONFIG_PATH):
         try:
             with open(CONFIG_PATH, "r", encoding="utf-8") as f:
                 config = json.load(f)
                 if "tdx_dir" in config:
-                    return config["tdx_dir"]
+                    path = config["tdx_dir"]
+                    import re
+                    # 若在 Linux/WSL 环境下，并且路径是 Windows 格式，自动转换为 WSL 挂载路径
+                    if sys.platform.startswith('linux') and (':' in path or '\\' in path):
+                        path = path.replace('\\', '/')
+                        match = re.match(r'^([a-zA-Z]):/(.*)', path)
+                        if match:
+                            drive = match.group(1).lower()
+                            subpath = match.group(2)
+                            path = f"/mnt/{drive}/{subpath}"
+                    return path
         except Exception:
             pass
-    return "/mnt/e/Tools/tdx"
+    return "/mnt/e/tdx"
 
 def load_stock_names(tdx_dir: str) -> dict:
     """从通达信 shs.tnf 和 szs.tnf 二进制缓存中极速解析股票代码与名称的映射关系"""
@@ -614,6 +624,8 @@ def main():
     limit_up = int(row_temp['limit_up'])
     limit_down = int(row_temp['limit_down'])
     median_return = float(row_temp['median_return'])
+    rising_amount = float(row_temp['rising_amount']) if 'rising_amount' in row_temp and pd.notnull(row_temp['rising_amount']) else 0.0
+    falling_amount = float(row_temp['falling_amount']) if 'falling_amount' in row_temp and pd.notnull(row_temp['falling_amount']) else 0.0
     trade_date = row_temp['trade_date']
     if pd.notnull(trade_date) and hasattr(trade_date, 'strftime'):
         try:
@@ -635,6 +647,128 @@ def main():
         cname = names_map.get(sym.lower(), "")
         streaks_list.append({"symbol": sym, "name": cname, "streak": stk})
         streak_counts[stk] = streak_counts.get(stk, 0) + 1
+
+    # 极速计算并解析当日所有涨停个股的原因，整合本地量化概念共振归因与实时个股新闻消息面深度归因
+    import re
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    
+    stock_concepts = {}
+    concept_counts = {}
+    
+    try:
+        sql_blocks = f"""
+        SELECT code, market, block_name 
+        FROM read_parquet('{BLOCK_MAPPINGS_PATH}')
+        WHERE block_category = 'concept'
+        """
+        df_blocks = con.execute(sql_blocks).fetchdf()
+    except Exception:
+        df_blocks = pd.DataFrame()
+        
+    if not df_blocks.empty:
+        for item in streaks_list:
+            sym = item['symbol'].lower()
+            mkt, code = sym[:2], sym[2:]
+            matched = df_blocks[(df_blocks['market'] == mkt) & (df_blocks['code'] == code)]
+            concepts = matched['block_name'].tolist()
+            stock_concepts[sym] = concepts
+            for c in concepts:
+                concept_counts[c] = concept_counts.get(c, 0) + 1
+
+    def extract_news_catalyst(content: str) -> str:
+        if not content:
+            return ""
+        match = re.search(r'(消息面[上]?[：，,][^。；\n\r]{10,150}[。；]?)', content)
+        if match:
+            return match.group(1).strip()
+        match2 = re.search(r'((?:受|因)[^。；\n\r]{10,100}(?:影响|刺激|推动|消息|拉升|走强)[^。；\n\r]{0,30}[。；]?)', content)
+        if match2:
+            return match2.group(1).strip()
+        return ""
+
+    def fetch_single_stock_news(sym, name):
+        try:
+            import akshare as ak
+            df = ak.stock_news_em(symbol=name)
+            if df.empty:
+                code_only = sym[2:] if len(sym) == 8 else sym
+                df = ak.stock_news_em(symbol=code_only)
+            if not df.empty:
+                return df
+        except Exception:
+            pass
+        return None
+
+    stock_news_map = {}
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        futures = {}
+        for item in streaks_list:
+            sym_lower = item['symbol'].lower()
+            name = names_map.get(sym_lower, "未知个股")
+            futures[executor.submit(fetch_single_stock_news, sym_lower, name)] = sym_lower
+            
+        for future in as_completed(futures):
+            sym_lower = futures[future]
+            try:
+                df_news = future.result()
+                if df_news is not None and not df_news.empty:
+                    stock_news_map[sym_lower] = df_news
+            except Exception:
+                pass
+                
+    limit_up_analysis_list = []
+    for item in streaks_list:
+        sym = item['symbol'].lower()
+        streak = int(item['streak'])
+        name = names_map.get(sym, "未知个股")
+        
+        concepts = stock_concepts.get(sym, [])
+        concepts_str = " + ".join(concepts[:2]) if concepts else ""
+        
+        news_reason = ""
+        df_news = stock_news_map.get(sym)
+        if df_news is not None and not df_news.empty:
+            for idx, row in df_news.head(8).iterrows():
+                title = str(row['新闻标题'])
+                content = str(row['新闻内容'])
+                cat = extract_news_catalyst(content)
+                if cat:
+                    if len(cat) > 130:
+                        cat = cat[:130] + "..."
+                    news_reason = cat
+                    break
+            
+            if not news_reason:
+                latest_title = str(df_news.iloc[0]['新闻标题'])
+                if len(latest_title) > 60:
+                    latest_title = latest_title[:60] + "..."
+                if "连收" in latest_title and "涨停板" in latest_title and len(df_news) > 1:
+                    latest_title = str(df_news.iloc[1]['新闻标题'])
+                    if len(latest_title) > 60:
+                        latest_title = latest_title[:60] + "..."
+                news_reason = f"相关报道：{latest_title}"
+                
+        if concepts_str and news_reason:
+            reason = f"【{concepts_str}】{news_reason}"
+        elif news_reason:
+            reason = news_reason
+        elif concepts_str:
+            concepts.sort(key=lambda c: concept_counts.get(c, 0), reverse=True)
+            lead_concept = concepts[0]
+            lead_cnt = concept_counts[lead_concept]
+            reason = f"概念共振: {lead_concept} (板块内共 {lead_cnt} 只涨停)"
+        else:
+            reason = "短线活跃资金封板，暂无消息面催化"
+            
+        limit_up_analysis_list.append({
+            "symbol": sym.upper(),
+            "name": name,
+            "streak": streak,
+            "reason": reason,
+            "concepts": concepts[:3]
+        })
+        
+    limit_up_analysis_list.sort(key=lambda x: (-x['streak'], x['symbol']))
 
     # 整理涨跌分布列表
     dist = {
@@ -723,9 +857,12 @@ def main():
         "rising_count": rising_count,
         "falling_count": falling_count,
         "flat_count": flat_count,
+        "rising_amount": rising_amount,
+        "falling_amount": falling_amount,
         "dist": dist,
         "streak_counts": {str(k): v for k, v in sorted(streak_counts.items(), reverse=True)},
         "streaks": streaks_list,
+        "limit_up_analysis": limit_up_analysis_list,
         "breadth": breadth_list,
         "industry_breadth": ind_breadth_list,
         "support": support_list,
@@ -825,20 +962,22 @@ def save_markdown_report(data):
 ## 🪜 二、 短线游资投机连板梯队
 
 短线情绪以**最新封死涨停板的个股连板高度**做核心度量：
-
-| 连板高度 (板) | 连板个股数 (只) | 对应强势个股代码 |
-| :---: | :---: | :--- |
 """
-    groups = {}
-    for s in data['streaks']:
-        disp = f"{s['symbol']}({s['name']})" if s.get('name') else s['symbol']
-        groups[s['streak']] = groups.get(s['streak'], []) + [disp]
-        
-    if not groups:
-        content += "| 暂无高度连板 | 0 | 市场投机情绪极弱，建议空仓避险 |\n"
+
+    # 按照连板股的分析数据渲染高保真明细表格
+    content += """
+| 连板高度 | 强势个股 | 涨停题材原因与最新消息面催化 |
+| :---: | :--- | :--- |
+"""
+    if not data.get('limit_up_analysis'):
+        content += "| 暂无高度连板 | - | 市场投机情绪极弱，建议空仓避险 |\n"
     else:
-        for k in sorted(groups.keys(), reverse=True):
-            content += f"| **{k} 连板** | {len(groups[k])} | {', '.join(groups[k])} |\n"
+        for item in data['limit_up_analysis']:
+            sym = item['symbol']
+            name = item['name']
+            streak = item['streak']
+            reason = item['reason']
+            content += f"| **{streak} 连板** | {name} ({sym}) | {reason} |\n"
 
     content += """
 ---
