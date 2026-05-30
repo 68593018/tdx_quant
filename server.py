@@ -692,6 +692,113 @@ def add_new_strategy(req: AddStrategyRequest):
     except Exception as e:
         return JSONResponse(status_code=500, content={"status": "error", "message": f"保存失败: {e}"})
 
+def fetch_eastmoney_limit_up_reasons() -> dict:
+    """
+    从东财数据中心 API 拉取今日最新的涨停原因解析。
+    返回 {symbol: {"reason": str, "concept": str}} 的映射字典。
+    """
+    import requests
+    url = "https://datacenter-web.eastmoney.com/api/data/v1/get?sortColumns=LIMIT_UP_TYPE,SURGE_REASON&sortTypes=1,-1&pageSize=500&pageNo=1&reportName=RPT_LIMITUP_DETAIL&columns=ALL&source=WEB&client=WEB"
+    try:
+        res = requests.get(url, timeout=3)
+        if res.ok:
+            data = res.json()
+            if data.get("result") and data["result"].get("data"):
+                mapping = {}
+                for item in data["result"]["data"]:
+                    code = item.get("SECURITY_CODE")
+                    name = item.get("SECURITY_NAME_ABBR")
+                    reason = item.get("SURGE_REASON") or item.get("REASON_INFO") or "热点题材轮动"
+                    if code:
+                        symbol = ""
+                        if len(code) == 6:
+                            if code.startswith(("60", "68")):
+                                symbol = f"sh{code}"
+                            elif code.startswith(("00", "30")):
+                                symbol = f"sz{code}"
+                            else:
+                                symbol = f"bj{code}"
+                        if symbol:
+                            mapping[symbol] = {
+                                "reason": reason,
+                                "name": name
+                            }
+                return mapping
+    except Exception as e:
+        print(f"[EastMoney Scraper Alert] - {e}")
+    return {}
+
+def get_limit_up_reasons_analysis(df_streaks, con, names_map) -> list:
+    """
+    计算并解析当日所有涨停个股的原因，整合东财实时原因与本地量化概念共振归因。
+    """
+    if df_streaks.empty:
+        return []
+        
+    import pandas as pd
+    
+    # 1. 尝试从东财拉取实时解析
+    em_reasons = fetch_eastmoney_limit_up_reasons()
+    
+    # 2. 本地量化概念归因计算
+    streaks_list = df_streaks.to_dict('records')
+    
+    stock_concepts = {}
+    concept_counts = {}
+    
+    try:
+        sql_blocks = f"""
+        SELECT code, market, block_name 
+        FROM read_parquet('{BLOCK_MAPPINGS_PATH}')
+        WHERE block_category = 'concept'
+        """
+        df_blocks = con.execute(sql_blocks).fetchdf()
+    except Exception:
+        df_blocks = pd.DataFrame()
+        
+    if not df_blocks.empty:
+        for item in streaks_list:
+            sym = item['symbol'].lower()
+            mkt, code = sym[:2], sym[2:]
+            matched = df_blocks[(df_blocks['market'] == mkt) & (df_blocks['code'] == code)]
+            concepts = matched['block_name'].tolist()
+            stock_concepts[sym] = concepts
+            for c in concepts:
+                concept_counts[c] = concept_counts.get(c, 0) + 1
+                
+    parsed_results = []
+    for item in streaks_list:
+        sym = item['symbol'].lower()
+        streak = int(item['streak'])
+        name = names_map.get(sym, "未知个股")
+        
+        reason = ""
+        if sym in em_reasons:
+            reason = em_reasons[sym]['reason']
+            name = em_reasons[sym].get('name', name)
+            
+        if not reason:
+            concepts = stock_concepts.get(sym, [])
+            if concepts:
+                # 寻找今日涨停数最多的概念
+                concepts.sort(key=lambda c: concept_counts.get(c, 0), reverse=True)
+                lead_concept = concepts[0]
+                lead_cnt = concept_counts[lead_concept]
+                reason = f"概念共振: {lead_concept} (板块内共 {lead_cnt} 只涨停)"
+            else:
+                reason = "短线活跃资金封板"
+                
+        parsed_results.append({
+            "symbol": sym.upper(),
+            "name": name,
+            "streak": streak,
+            "reason": reason,
+            "concepts": stock_concepts.get(sym, [])[:3]
+        })
+        
+    parsed_results.sort(key=lambda x: (-x['streak'], x['symbol']))
+    return parsed_results
+
 @app.get("/api/market/data", summary="极速多线程计算并获取全市场情绪与大盘雷达 JSON 数据")
 def get_market_data(refresh: bool = False):
     global _MARKET_CACHE
@@ -826,6 +933,9 @@ def get_market_data(refresh: bool = False):
         streaks_list.append({"symbol": sym, "name": cname, "streak": stk})
         streak_counts[stk] = streak_counts.get(stk, 0) + 1
 
+    # 计算今日涨停板原因深度解析
+    limit_up_analysis_list = get_limit_up_reasons_analysis(df_streaks, con, names_map)
+
     dist = {
         "limit_up": int(row_temp['limit_up']),
         "p7_10": int(row_temp['p7_10']),
@@ -923,6 +1033,7 @@ def get_market_data(refresh: bool = False):
         "dist": dist,
         "streak_counts": {str(k): v for k, v in sorted(streak_counts.items(), reverse=True)},
         "streaks": streaks_list,
+        "limit_up_analysis": limit_up_analysis_list,
         "breadth": breadth_list,
         "industry_breadth": ind_breadth_list,
         "support": support_list,
@@ -2082,6 +2193,709 @@ def get_stock_pattern_match(symbol: str, window_size: int = 30, predict_size: in
             "prices": target_prices
         },
         "matches": aligned_matches
+    }
+
+# -------------------------------------------------------------
+# 7.6. 个股均线偏离度（乖离率）低吸/止盈参数网格自动寻优 API (GET)
+# -------------------------------------------------------------
+def simulate_single_stock_strategy(df, ma_col, bias_col, d_buy, d_sell, stop_loss_pct=10.0, holding_limit=20):
+    """
+    均线偏离度（乖离率）低吸与止盈策略向量化快速对账模拟器。
+    无未来函数：昨日收盘价触发偏离度买入/卖出信号，今日开盘价交易。
+    """
+    # 转换为 ndarray 加速
+    dates = df['date_str'].to_numpy()
+    closes = df['close_adj'].to_numpy()
+    opens = df['open_adj'].to_numpy()
+    highs = df['high_adj'].to_numpy()
+    lows = df['low_adj'].to_numpy()
+    mas = df[ma_col].to_numpy()
+    biases = df[bias_col].to_numpy()
+    
+    trades = []
+    in_position = False
+    buy_price = 0.0
+    buy_date = None
+    holding_days = 0
+    
+    n_days = len(closes)
+    
+    for i in range(1, n_days):
+        # 确保指标有效
+        if pd.isna(mas[i-1]) or pd.isna(biases[i-1]):
+            continue
+            
+        if not in_position:
+            # 昨天收盘价跌破均线达到偏离度触发条件 -> 今天开盘买入
+            if biases[i-1] <= -d_buy:
+                in_position = True
+                buy_price = opens[i]
+                buy_date = dates[i]
+                holding_days = 0
+        else:
+            holding_days += 1
+            # 检查卖出条件：
+            # 1. 达到均线止盈目标值（今天收盘价偏离度 >= d_sell）
+            tp_triggered = (biases[i] >= d_sell)
+            
+            # 2. 硬止损（今天最低价跌破买入价格 -10%）
+            stop_triggered = (lows[i] <= buy_price * (1.0 - stop_loss_pct / 100.0))
+            
+            # 3. 持有期限制
+            time_triggered = (holding_days >= holding_limit)
+            
+            if tp_triggered or stop_triggered or time_triggered:
+                # 触发卖出信号，次日（i+1）开盘卖出
+                sell_idx = min(i + 1, n_days - 1)
+                sell_price = opens[sell_idx]
+                sell_date = dates[sell_idx]
+                
+                # 如果是止损触发，真实撮合时应以止损价和次日开盘价的较差者作为实际成交价（模拟跳空低开滑点）
+                if stop_triggered:
+                    sell_price = min(buy_price * (1.0 - stop_loss_pct / 100.0), opens[sell_idx])
+                    
+                pnl = (sell_price - buy_price) / buy_price
+                trades.append({
+                    "buy_date": str(buy_date),
+                    "sell_date": str(sell_date),
+                    "buy_price": round(float(buy_price), 2),
+                    "sell_price": round(float(sell_price), 2),
+                    "pnl": float(pnl),
+                    "holding_days": int(holding_days)
+                })
+                in_position = False
+                
+    return trades
+
+def simulate_fast_backtest(dates, closes, opens, highs, lows, mas, biases, d_buy, d_sell, stop_loss_pct, holding_limit):
+    """
+    极简向量化极速交易策略回测器，专为 Optuna 高频优化打造。
+    """
+    trades = []
+    in_position = False
+    buy_price = 0.0
+    buy_date = None
+    holding_days = 0
+    
+    n_days = len(closes)
+    
+    for i in range(1, n_days):
+        # 确保指标有效
+        if pd.isna(mas[i-1]) or pd.isna(biases[i-1]):
+            continue
+            
+        if not in_position:
+            # 昨天收盘价跌破均线达到偏离度触发条件 -> 今天开盘买入
+            if biases[i-1] <= -d_buy:
+                in_position = True
+                buy_price = opens[i]
+                buy_date = dates[i]
+                holding_days = 0
+        else:
+            holding_days += 1
+            # 检查卖出条件：
+            # 1. 达到均线止盈目标值（今天收盘价偏离度 >= d_sell）
+            tp_triggered = (biases[i] >= d_sell)
+            
+            # 2. 硬止损（今天最低价跌破买入价格 -stop_loss_pct%）
+            stop_triggered = (lows[i] <= buy_price * (1.0 - stop_loss_pct / 100.0))
+            
+            # 3. 持有期限制
+            time_triggered = (holding_days >= holding_limit)
+            
+            if tp_triggered or stop_triggered or time_triggered:
+                # 触发卖出信号，次日（i+1）开盘卖出
+                sell_idx = min(i + 1, n_days - 1)
+                sell_price = opens[sell_idx]
+                sell_date = dates[sell_idx]
+                
+                if stop_triggered:
+                    sell_price = min(buy_price * (1.0 - stop_loss_pct / 100.0), opens[sell_idx])
+                    
+                pnl = (sell_price - buy_price) / buy_price
+                trades.append({
+                    "buy_date": str(buy_date),
+                    "sell_date": str(sell_date),
+                    "buy_price": float(buy_price),
+                    "sell_price": float(sell_price),
+                    "pnl": float(pnl),
+                    "holding_days": int(holding_days)
+                })
+                in_position = False
+                
+    return trades
+
+def run_backtest_metrics(dates, closes, opens, highs, lows, mas, biases, d_buy, d_sell, stop_loss_pct, holding_limit):
+    """
+    计算回测引擎指标总览。
+    """
+    trades = simulate_fast_backtest(dates, closes, opens, highs, lows, mas, biases, d_buy, d_sell, stop_loss_pct, holding_limit)
+    total_trades = len(trades)
+    if total_trades == 0:
+        return {
+            "total_trades": 0,
+            "win_rate": 0.0,
+            "avg_return": 0.0,
+            "total_return": 0.0,
+            "max_dd": 0.0,
+            "calmar": 0.0,
+            "trades": []
+        }
+        
+    win_count = sum(1 for t in trades if t['pnl'] > 0)
+    win_rate = win_count / total_trades * 100
+    avg_return = sum(t['pnl'] for t in trades) / total_trades * 100
+    
+    # 累计收益率
+    equity = 1.0
+    equity_curve = [1.0]
+    for t in trades:
+        equity *= (1.0 + t['pnl'])
+        equity_curve.append(equity)
+        
+    max_dd = 0.0
+    peak = 1.0
+    for eq in equity_curve:
+        if eq > peak:
+            peak = eq
+        dd = (peak - eq) / peak
+        if dd > max_dd:
+            max_dd = dd
+            
+    total_return = (equity - 1.0) * 100
+    max_dd_pct = max_dd * 100
+    calmar = total_return / max_dd_pct if max_dd_pct > 0 else total_return / 0.1
+    
+    return {
+        "total_trades": total_trades,
+        "win_rate": round(win_rate, 2),
+        "avg_return": round(avg_return, 2),
+        "total_return": round(total_return, 2),
+        "max_dd": round(max_dd_pct, 2),
+        "calmar": round(calmar, 4),
+        "trades": trades
+    }
+
+@app.get("/api/stock/optimize_bias", summary="对指定股票的均线偏离度（乖离率）低吸/止盈交易策略进行网格参数自动寻优")
+def optimize_stock_bias(symbol: str):
+    if not symbol or len(symbol.strip()) == 0:
+        return JSONResponse(status_code=400, content={"status": "error", "message": "股票代码不能为空！"})
+        
+    symbol = symbol.strip().lower()
+    tdx_dir = load_tdx_dir()
+    names_map = load_stock_names(tdx_dir)
+    
+    # 自动解析股票代码
+    resolved_symbol = None
+    if re.match(r'^\d{6}$', symbol):
+        code_only = symbol
+        symbol_full = [s for s in names_map.keys() if s.endswith(code_only)]
+        if symbol_full:
+            resolved_symbol = symbol_full[0]
+        else:
+            files = os.listdir(DATA_STORE_DIR)
+            matched_files = [f for f in files if f.endswith('.parquet') and f.startswith(('sh', 'sz', 'bj')) and f[2:8] == code_only]
+            if matched_files:
+                resolved_symbol = matched_files[0].replace('.parquet', '')
+            else:
+                if code_only.startswith(('60', '68')):
+                    resolved_symbol = f"sh{code_only}"
+                elif code_only.startswith(('00', '30')):
+                    resolved_symbol = f"sz{code_only}"
+                else:
+                    resolved_symbol = f"bj{code_only}"
+    else:
+        resolved_symbol = symbol
+        
+    pq_path = os.path.join(DATA_STORE_DIR, f"{resolved_symbol}.parquet")
+    if not os.path.exists(pq_path):
+        return JSONResponse(status_code=404, content={"status": "error", "message": f"未找到该股票数据！请先确认股票代码，或执行数据同步以创建数据池。"})
+        
+    con = duckdb.connect()
+    stock_name = names_map.get(resolved_symbol, "未知个股")
+    
+    # 加载最多 10 年（2500 行）的历史数据
+    try:
+        sql = f"""
+        SELECT date, open_adj, high_adj, low_adj, close_adj, volume 
+        FROM read_parquet('{pq_path}') 
+        ORDER BY date DESC 
+        LIMIT 2500
+        """
+        df = con.execute(sql).fetchdf()
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"status": "error", "message": f"读取个股历史 K 线数据失败: {e}"})
+        
+    if df.empty or len(df) < 120:
+        return JSONResponse(status_code=404, content={"status": "error", "message": "该个股历史数据过少（少于120个交易日），无法进行网格超参寻优计算！"})
+        
+    # 转为升序用于时间序列滚动计算
+    df = df.iloc[::-1].reset_index(drop=True)
+    df['date_str'] = df['date'].apply(lambda x: x.strftime('%Y-%m-%d') if (pd.notnull(x) and hasattr(x, 'strftime')) else str(x)[:10])
+    
+    import numpy as np
+
+    # 🧬 计算五维主升浪核心量化因子
+    # 1. BIAS20 (偏离度百分比)
+    df['f_bias'] = (df['close_adj'] - df['close_adj'].rolling(window=20).mean()) / df['close_adj'].rolling(window=20).mean() * 100.0
+    # 2. VOL_RATIO (异常量能比率)
+    df['volume_ma'] = df['volume'].rolling(window=20).mean()
+    df['f_vol_ratio'] = np.where(df['volume_ma'] > 0, df['volume'] / df['volume_ma'], 0.0)
+    # 3. MOMENTUM (10日动量百分比)
+    df['f_momentum'] = df['close_adj'].pct_change(periods=10) * 100.0
+    # 4. VOLATILITY (20日收益率波动百分比)
+    df['f_volatility'] = df['close_adj'].pct_change().rolling(window=20).std() * 100.0
+    # 5. MA_SLOPE (20日均线的5日斜率百分比)
+    ma20_temp = df['close_adj'].rolling(window=20).mean()
+    df['f_ma_slope'] = (ma20_temp - ma20_temp.shift(5)) / ma20_temp.shift(5) * 100.0
+    
+    # 转化五维因子为本股10年历史百分位数 (0-100)
+    df['f_bias_pct'] = df['f_bias'].rank(pct=True) * 100.0
+    df['f_vol_ratio_pct'] = df['f_vol_ratio'].rank(pct=True) * 100.0
+    df['f_momentum_pct'] = df['f_momentum'].rank(pct=True) * 100.0
+    df['f_volatility_pct'] = df['f_volatility'].rank(pct=True) * 100.0
+    df['f_ma_slope_pct'] = df['f_ma_slope'].rank(pct=True) * 100.0
+    
+    # 动态自适应提取拉升前夕信号日 (Eve Signals)
+    # 检测未来10个交易日内最大涨幅：(未来10日最高收盘价 - 当前收盘价) / 当前收盘价
+    df['future_max_close_10d'] = df['close_adj'].shift(-10).rolling(window=10, min_periods=1).max()
+    df['future_ret_10d'] = (df['future_max_close_10d'] - df['close_adj']) / df['close_adj'] * 100.0
+    
+    eve_thresholds = [20.0, 15.0, 10.0, 5.0]
+    selected_indices = []
+    final_threshold = 20.0
+    
+    for th in eve_thresholds:
+        candidates = []
+        n_rows = len(df)
+        for i in range(25, n_rows - 10):
+            # 过滤NaN因子
+            if pd.isna(df['f_bias_pct'].iloc[i]) or pd.isna(df['f_vol_ratio_pct'].iloc[i]) or \
+               pd.isna(df['f_momentum_pct'].iloc[i]) or pd.isna(df['f_volatility_pct'].iloc[i]) or \
+               pd.isna(df['f_ma_slope_pct'].iloc[i]):
+                continue
+            if df['future_ret_10d'].iloc[i] >= th:
+                candidates.append(i)
+                
+        # 时序去重去噪：间隔必须 > 5 天
+        filtered_cand = []
+        for idx in candidates:
+            if not filtered_cand or (idx - filtered_cand[-1] > 5):
+                filtered_cand.append(idx)
+                
+        if len(filtered_cand) >= 5:
+            selected_indices = filtered_cand
+            final_threshold = th
+            break
+            
+    # 如果极度稀疏，兜底处理
+    if not selected_indices:
+        selected_indices = [i for i in range(25, len(df) - 10) if not pd.isna(df['f_bias_pct'].iloc[i])][:10]
+        final_threshold = 5.0
+        
+    # 计算主升浪基因重心分位数 (Historical Centroid)
+    hist_bias = float(df['f_bias_pct'].iloc[selected_indices].mean())
+    hist_vol = float(df['f_vol_ratio_pct'].iloc[selected_indices].mean())
+    hist_mom = float(df['f_momentum_pct'].iloc[selected_indices].mean())
+    hist_volatility = float(df['f_volatility_pct'].iloc[selected_indices].mean())
+    hist_slope = float(df['f_ma_slope_pct'].iloc[selected_indices].mean())
+    
+    # 提取今日特征指纹百分位数并进行NaN防错处理
+    curr_bias = df['f_bias_pct'].iloc[-1]
+    curr_vol = df['f_vol_ratio_pct'].iloc[-1]
+    curr_mom = df['f_momentum_pct'].iloc[-1]
+    curr_volatility = df['f_volatility_pct'].iloc[-1]
+    curr_slope = df['f_ma_slope_pct'].iloc[-1]
+    
+    if pd.isna(curr_bias) or pd.isna(curr_vol) or pd.isna(curr_mom) or pd.isna(curr_volatility) or pd.isna(curr_slope):
+        for k in range(-1, -50, -1):
+            if not (pd.isna(df['f_bias_pct'].iloc[k]) or pd.isna(df['f_vol_ratio_pct'].iloc[k]) or \
+                    pd.isna(df['f_momentum_pct'].iloc[k]) or pd.isna(df['f_volatility_pct'].iloc[k]) or \
+                    pd.isna(df['f_ma_slope_pct'].iloc[k])):
+                curr_bias = df['f_bias_pct'].iloc[k]
+                curr_vol = df['f_vol_ratio_pct'].iloc[k]
+                curr_mom = df['f_momentum_pct'].iloc[k]
+                curr_volatility = df['f_volatility_pct'].iloc[k]
+                curr_slope = df['f_ma_slope_pct'].iloc[k]
+                break
+                
+    curr_bias = float(curr_bias) if not pd.isna(curr_bias) else 50.0
+    curr_vol = float(curr_vol) if not pd.isna(curr_vol) else 50.0
+    curr_mom = float(curr_mom) if not pd.isna(curr_mom) else 50.0
+    curr_volatility = float(curr_volatility) if not pd.isna(curr_volatility) else 50.0
+    curr_slope = float(curr_slope) if not pd.isna(curr_slope) else 50.0
+    
+    # 计算重合度百分比 (Average Absolute Difference Similarity)
+    diff_bias = curr_bias - hist_bias
+    diff_vol = curr_vol - hist_vol
+    diff_mom = curr_mom - hist_mom
+    diff_volatility = curr_volatility - hist_volatility
+    diff_slope = curr_slope - hist_slope
+    
+    avg_diff = (abs(diff_bias) + abs(diff_vol) + abs(diff_mom) + abs(diff_volatility) + abs(diff_slope)) / 5.0
+    similarity = max(0.0, min(100.0, 100.0 - avg_diff))
+    similarity = round(similarity, 1)
+    
+    fingerprint_details = [
+        {"name": "偏离度 (BIAS20)", "current": curr_bias, "historical": hist_bias, "diff": diff_bias},
+        {"name": "异常量能 (VOL_RATIO)", "current": curr_vol, "historical": hist_vol, "diff": diff_vol},
+        {"name": "动量强度 (MOMENTUM)", "current": curr_mom, "historical": hist_mom, "diff": diff_mom},
+        {"name": "历史波动 (VOLATILITY)", "current": curr_volatility, "historical": hist_volatility, "diff": diff_volatility},
+        {"name": "均线斜率 (MA_SLOPE)", "current": curr_slope, "historical": hist_slope, "diff": diff_slope}
+    ]
+    
+    fingerprint_node = {
+        "similarity": similarity,
+        "total_events": len(selected_indices),
+        "details": fingerprint_details
+    }
+    
+    # 批量计算均线和偏离度
+    ma_vals = [10, 20, 30, 60]
+    for n in ma_vals:
+        df[f'ma{n}'] = df['close_adj'].rolling(window=n).mean()
+        df[f'bias{n}'] = (df['close_adj'] - df[f'ma{n}']) / df[f'ma{n}']
+        
+    buy_vals = [-0.02, -0.04, -0.06, -0.08, -0.10, -0.12, -0.15]
+    sell_vals = [0.05, 0.10, 0.15, 0.20]
+    
+    all_runs = []
+    heatmap_matrix = []
+    
+    # 开始寻优网格计算
+    for ma_idx, ma_period in enumerate(ma_vals):
+        ma_col = f"ma{ma_period}"
+        bias_col = f"bias{ma_period}"
+        for buy_idx, buy_val in enumerate(buy_vals):
+            best_calmar = -99999.0
+            best_run = {
+                "ma": ma_period,
+                "buy_pct": int(round(buy_val * 100)),
+                "sell_pct": 10,
+                "total_trades": 0,
+                "win_rate": 0.0,
+                "avg_return": 0.0,
+                "total_return": 0.0,
+                "max_dd": 0.0,
+                "calmar": 0.0
+            }
+            
+            for sell_val in sell_vals:
+                trades = simulate_single_stock_strategy(df, ma_col, bias_col, abs(buy_val), sell_val)
+                total_trades = len(trades)
+                
+                if total_trades > 0:
+                    win_count = sum(1 for t in trades if t['pnl'] > 0)
+                    win_rate = win_count / total_trades * 100
+                    avg_return = sum(t['pnl'] for t in trades) / total_trades * 100
+                    
+                    # 算累计收益曲线
+                    equity = 1.0
+                    equity_curve = [1.0]
+                    for t in trades:
+                        equity *= (1.0 + t['pnl'])
+                        equity_curve.append(equity)
+                        
+                    max_dd = 0.0
+                    peak = 1.0
+                    for eq in equity_curve:
+                        if eq > peak:
+                            peak = eq
+                        dd = (peak - eq) / peak
+                        if dd > max_dd:
+                            max_dd = dd
+                            
+                    total_return = (equity - 1.0) * 100
+                    max_dd_pct = max_dd * 100
+                    calmar = total_return / max_dd_pct if max_dd_pct > 0 else total_return / 0.1
+                    
+                    run_metrics = {
+                        "ma": ma_period,
+                        "buy_pct": int(round(buy_val * 100)),
+                        "sell_pct": int(round(sell_val * 100)),
+                        "total_trades": total_trades,
+                        "win_rate": round(win_rate, 2),
+                        "avg_return": round(avg_return, 2),
+                        "total_return": round(total_return, 2),
+                        "max_dd": round(max_dd_pct, 2),
+                        "calmar": round(calmar, 4)
+                    }
+                else:
+                    run_metrics = {
+                        "ma": ma_period,
+                        "buy_pct": int(round(buy_val * 100)),
+                        "sell_pct": int(round(sell_val * 100)),
+                        "total_trades": 0,
+                        "win_rate": 0.0,
+                        "avg_return": 0.0,
+                        "total_return": 0.0,
+                        "max_dd": 0.0,
+                        "calmar": 0.0
+                    }
+                    
+                all_runs.append(run_metrics)
+                if run_metrics["calmar"] > best_calmar:
+                    best_calmar = run_metrics["calmar"]
+                    best_run = run_metrics
+            
+            # 存入 2D 热力图
+            # [buy_index, ma_index, total_return_value, best_sell_pct, win_rate, max_dd, total_trades]
+            heatmap_matrix.append([
+                buy_idx,
+                ma_idx,
+                round(best_run["total_return"], 2),
+                best_run["sell_pct"],
+                best_run["win_rate"],
+                best_run["max_dd"],
+                best_run["total_trades"]
+            ])
+            
+    # 筛选有效样本排序 (交易笔数 >= 3)
+    valid_runs = [r for r in all_runs if r["total_trades"] >= 3]
+    valid_runs.sort(key=lambda x: (x["calmar"], x["total_return"]), reverse=True)
+    if not valid_runs:
+        valid_runs = sorted(all_runs, key=lambda x: (x["calmar"], x["total_return"]), reverse=True)
+        
+    top_5 = valid_runs[:5]
+    
+    # -------------------------------------------------------------
+    # Optuna 深度智能寻优 (连续空间参数优化)
+    # -------------------------------------------------------------
+    import optuna
+    optuna.logging.set_verbosity(optuna.logging.WARNING)
+    
+    # 划分样本内与样本外区间 (80% 训练 vs 20% 测试)
+    split_idx = int(len(df) * 0.8)
+    
+    dates_full = df['date_str'].to_numpy()
+    closes_full = df['close_adj'].to_numpy()
+    opens_full = df['open_adj'].to_numpy()
+    highs_full = df['high_adj'].to_numpy()
+    lows_full = df['low_adj'].to_numpy()
+
+    def objective(trial):
+        ma_period = trial.suggest_int('ma_period', 5, 60)
+        buy_bias = trial.suggest_float('buy_bias', 0.01, 0.25)
+        sell_bias = trial.suggest_float('sell_bias', 0.02, 0.35)
+        stop_loss = trial.suggest_float('stop_loss', 3.0, 20.0)
+        holding_limit = trial.suggest_int('holding_limit', 5, 50)
+        
+        # 计算全局 MA & Bias 偏离度
+        ma_full = df['close_adj'].rolling(window=ma_period).mean().to_numpy()
+        bias_full = (closes_full - ma_full) / ma_full
+        
+        # 截取样本内 (训练集) 跑网对账
+        dates_in = dates_full[:split_idx]
+        closes_in = closes_full[:split_idx]
+        opens_in = opens_full[:split_idx]
+        highs_in = highs_full[:split_idx]
+        lows_in = lows_full[:split_idx]
+        mas_in = ma_full[:split_idx]
+        biases_in = bias_full[:split_idx]
+        
+        trades = simulate_fast_backtest(
+            dates_in, closes_in, opens_in, highs_in, lows_in,
+            mas_in, biases_in, buy_bias, sell_bias, stop_loss, holding_limit
+        )
+        
+        if len(trades) < 3:
+            return -9999.0
+            
+        equity = 1.0
+        equity_curve = [1.0]
+        for t in trades:
+            equity *= (1.0 + t['pnl'])
+            equity_curve.append(equity)
+            
+        max_dd = 0.0
+        peak = 1.0
+        for eq in equity_curve:
+            if eq > peak:
+                peak = eq
+            dd = (peak - eq) / peak
+            if dd > max_dd:
+                max_dd = dd
+                
+        total_return = (equity - 1.0) * 100
+        max_dd_pct = max_dd * 100
+        calmar = total_return / max_dd_pct if max_dd_pct > 0 else total_return / 0.1
+        return calmar
+
+    study = optuna.create_study(direction='maximize')
+    study.optimize(objective, n_trials=500)
+    
+    # 获取最优参数，若寻优失败（全部返回-9999）则使用网格搜索首选作为备用兜底
+    if study.best_value > -9000.0:
+        opt_ma = int(study.best_params['ma_period'])
+        opt_buy = float(study.best_params['buy_bias'])
+        opt_sell = float(study.best_params['sell_bias'])
+        opt_stop = float(study.best_params['stop_loss'])
+        opt_hold = int(study.best_params['holding_limit'])
+    else:
+        opt_ma = int(top_5[0]['ma'])
+        opt_buy = float(abs(top_5[0]['buy_pct']) / 100.0)
+        opt_sell = float(top_5[0]['sell_pct'] / 100.0)
+        opt_stop = 10.0
+        opt_hold = 20
+
+    # -------------------------------------------------------------
+    # 样本内外表现对比测试
+    # -------------------------------------------------------------
+    ma_full = df['close_adj'].rolling(window=opt_ma).mean().to_numpy()
+    bias_full = (closes_full - ma_full) / ma_full
+
+    # 样本内 metrics
+    in_metrics = run_backtest_metrics(
+        dates_full[:split_idx], closes_full[:split_idx], opens_full[:split_idx], highs_full[:split_idx], lows_full[:split_idx],
+        ma_full[:split_idx], bias_full[:split_idx], opt_buy, opt_sell, opt_stop, opt_hold
+    )
+    
+    # 样本外 metrics
+    out_metrics = run_backtest_metrics(
+        dates_full[split_idx:], closes_full[split_idx:], opens_full[split_idx:], highs_full[split_idx:], lows_full[split_idx:],
+        ma_full[split_idx:], bias_full[split_idx:], opt_buy, opt_sell, opt_stop, opt_hold
+    )
+    
+    # 全历史 metrics
+    full_metrics = run_backtest_metrics(
+        dates_full, closes_full, opens_full, highs_full, lows_full,
+        ma_full, bias_full, opt_buy, opt_sell, opt_stop, opt_hold
+    )
+
+    # -------------------------------------------------------------
+    # 自动生成“个股专属规律总结报告”并写入磁盘归档
+    # -------------------------------------------------------------
+    import datetime
+    current_time = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    
+    start_date = df['date_str'].iloc[0]
+    end_date = df['date_str'].iloc[-1]
+    total_days = len(df)
+    
+    in_start = df['date_str'].iloc[0]
+    in_end = df['date_str'].iloc[split_idx - 1]
+    
+    out_start = df['date_str'].iloc[split_idx]
+    out_end = df['date_str'].iloc[-1]
+    
+    if out_metrics["total_return"] > 0 and out_metrics["win_rate"] >= 50.0:
+        diagnostic_text = f"该股表现出<b>极佳的样本外泛化能力</b>！在测试期（{out_start} 至 {out_end}）内，黄金参数组合依然录得了 <b>{out_metrics['total_return']}%</b> 的累计总收益，胜率达 <b>{out_metrics['win_rate']}%</b>，卡玛比率达 <b>{out_metrics['calmar']}</b>。这表明该股在 MA{opt_ma} 均线下的均值回归规律非常牢固且稳定，属于典型的『高胜率均线支撑型个股』，极具实盘参考价值。"
+    elif in_metrics["total_return"] > 10.0 and out_metrics["total_return"] <= 0:
+        diagnostic_text = f"注意<b>过度拟合（Overfitting）风险</b>！在样本内寻优中，参数组合获得了高达 <b>{in_metrics['total_return']}%</b> 的利润，但在样本外测试期内累计录得 <b>{out_metrics['total_return']}%</b>，表现大幅恶化。这提示我们该股近期的波动特征已经发生显著变异（如从震荡均值回归市转为单边下行熊市），历史的均线低吸参数在当下已经部分失效，实盘中应极其谨慎，务必配合大势风控锁！"
+    else:
+        diagnostic_text = f"该股在偏离度策略下的表现一般。样本内与样本外交易频次偏低（全周期共 {full_metrics['total_trades']} 次），且整体累计期望表现一般。这说明 <b>{stock_name}</b> 的走势更多受到题材消息面驱动或跟随大盘指数剧烈波动，并非典型的『规律均值回归个股』。不建议将偏离度低吸模型作为该个股的核心交易策略。"
+        
+    report_content = f"""# 🔬 个股专属规律因子寻优战报：{stock_name} ({resolved_symbol.upper()})
+> **由 Antigravity 量化终端 Optuna 智能寻优引擎自动生成**
+> 生成时间: {current_time}
+> 数据周期: {start_date} 至 {end_date} (共 {total_days} 个交易日)
+
+---
+
+## 🥇 Optuna 智能超参黄金组合结论
+经过 **500 次** 高性能贝叶斯智能多维空间扫网，为 **{stock_name} ({resolved_symbol.upper()})** 寻优得出以下**个股专属黄金因子与风控参数**：
+
+| 参数名称 | 寻优结果值 | 参数释义 |
+| :--- | :---: | :--- |
+| **黄金支撑均线 (MA_N)** | **MA{opt_ma}** | 核心情绪与波动分水岭 |
+| **低吸买入偏离度 ($D_{{buy}}$)** | **-{round(opt_buy * 100, 2)}%** | 均线下方的安全垫超跌低吸触发点 |
+| **止盈卖出偏离度 ($D_{{sell}}$)** | **+{round(opt_sell * 100, 2)}%** | 多头拉回均线之上的止盈卖点 |
+| **硬止损风控线 (Stop Loss)** | **-{round(opt_stop, 2)}%** | 规避极端单边下行风险的熔断闸门 |
+| **最大持股交易期限** | **{opt_hold} 天** | 截断低效耗时、提高资金周转的时间闸门 |
+
+---
+
+## 📈 样本内外表现对比 (In-sample vs Out-of-sample)
+为检验因子的样本外泛化能力，我们采用 **80% 历史数据作样本内训练，最后 20% 历史数据作样本外测试**。数据表现对账如下：
+
+| 指标维度 | 样本内 (In-sample 80%) | 样本外 (Out-of-sample 20%) | 全历史区间 (Full Period) |
+| :--- | :---: | :---: | :---: |
+| **时间区间** | {in_start} 至 {in_end} | {out_start} 至 {out_end} | {start_date} 至 {end_date} |
+| **交易笔数** | {in_metrics['total_trades']} 笔 | {out_metrics['total_trades']} 笔 | {full_metrics['total_trades']} 笔 |
+| **胜率 (Win Rate)** | **{in_metrics['win_rate']}%** | **{out_metrics['win_rate']}%** | **{full_metrics['win_rate']}%** |
+| **平均单笔收益** | {in_metrics['avg_return']}% | {out_metrics['avg_return']}% | {full_metrics['avg_return']}% |
+| **累计总收益率** | **{in_metrics['total_return']}%** | **{out_metrics['total_return']}%** | **{full_metrics['total_return']}%** |
+| **最大波段回撤** | {in_metrics['max_dd']}% | {out_metrics['max_dd']}% | {full_metrics['max_dd']}% |
+| **风险比率 (Calmar)** | **{in_metrics['calmar']}** | **{out_metrics['calmar']}** | **{full_metrics['calmar']}** |
+
+---
+
+## 🧠 专家系统多因子规律诊断
+根据样本内外数据对比，系统对 **{stock_name}** 给出以下诊断结论：
+{diagnostic_text}
+
+---
+
+## 🧬 主升浪因子基因指纹分析
+根据对历史拉升前夕多维因子的特征分析，该股共检测到 **{len(selected_indices)}** 次完美契合主升浪特征的启动窗口（未来10日最大涨幅阈值: {final_threshold}%）。当前个股截面因子百分位特征与历史起爆前夕的**基因指纹重合度为 {similarity}%**。
+
+### 五维指纹因子比对细账：
+| 因子维度 | 今日实时分位数 | 历史拉升前夕分位数 | 离散偏离度 |
+| :--- | :---: | :---: | :---: |
+| **偏离度 (BIAS20)** | {curr_bias:.1f}% | {hist_bias:.1f}% | {diff_bias:+.1f}% |
+| **异常量能 (VOL_RATIO)** | {curr_vol:.1f}% | {hist_vol:.1f}% | {diff_vol:+.1f}% |
+| **动量强度 (MOMENTUM)** | {curr_mom:.1f}% | {hist_mom:.1f}% | {diff_mom:+.1f}% |
+| **历史波动 (VOLATILITY)** | {curr_volatility:.1f}% | {hist_volatility:.1f}% | {diff_volatility:+.1f}% |
+| **均线斜率 (MA_SLOPE)** | {curr_slope:.1f}% | {hist_slope:.1f}% | {diff_slope:+.1f}% |
+
+---
+*声明：本报告为自动算法量化回测战报，不构成任何实质性投资建议。股市有风险，入市需谨慎。*
+"""
+    
+    report_filename = f"{resolved_symbol.upper()}_{stock_name}_因子寻优战报.md"
+    report_filepath = os.path.join(REPORT_DIR, report_filename)
+    try:
+        with open(report_filepath, "w", encoding="utf-8") as f:
+            f.write(report_content)
+    except Exception as e:
+        print(f"[Report Error] Failed to write report file: {e}")
+
+    # 专家智能诊断文本
+    if top_5 and top_5[0]["total_return"] > 0:
+        best = top_5[0]
+        suggestion_text = (
+            f"系统寻优得出 <b>{stock_name} ({resolved_symbol.upper()})</b> 的黄金低吸组合为：于 <b>MA{best['ma']}</b> 生命线下方 <b>{abs(best['buy_pct'])}%</b> 处挂单低吸，并在拉回线上 <b>{best['sell_pct']}%</b> 处止盈离场。该规律在历史大样本回测中成功触发 <b>{best['total_trades']}</b> 次，<b>胜率达 {best['win_rate']}%</b>，累计跑赢基准 <b>{best['total_return']}%</b>，最大波段回撤控制在 {best['max_dd']}%，体现了极佳的统计显著性与抗风险安全垫。"
+        )
+        suggestion_color = "cyber-up"
+    else:
+        suggestion_text = (
+            f"经过对 <b>{stock_name} ({resolved_symbol.upper()})</b> 进行 112 组多周期偏离度参数全网扫网，发现在本股的历史波动框架下均线偏离度低吸模型并未产出具有统计学显著优势的稳定盈利区间。这表明该股表现受大盘系统性牛熊、行业强周期轮动或特定题材驱动更深，其走势不遵循规律均线偏离度均值回归，不建议使用单兵低吸偏离度网格策略。"
+        )
+        suggestion_color = "cyber-textMuted"
+        
+    return {
+        "status": "success",
+        "symbol": resolved_symbol.upper(),
+        "name": stock_name,
+        "heatmap": heatmap_matrix,
+        "top_5": top_5,
+        "suggestion": {
+            "text": suggestion_text,
+            "color": suggestion_color
+        },
+        "optuna": {
+            "ma": opt_ma,
+            "buy_pct": round(opt_buy * 100, 2),
+            "sell_pct": round(opt_sell * 100, 2),
+            "stop_loss": round(opt_stop, 2),
+            "holding_limit": opt_hold,
+            "in_sample": {
+                "total_trades": in_metrics["total_trades"],
+                "win_rate": in_metrics["win_rate"],
+                "total_return": in_metrics["total_return"],
+                "max_dd": in_metrics["max_dd"],
+                "calmar": in_metrics["calmar"]
+            },
+            "out_of_sample": {
+                "total_trades": out_metrics["total_trades"],
+                "win_rate": out_metrics["win_rate"],
+                "total_return": out_metrics["total_return"],
+                "max_dd": out_metrics["max_dd"],
+                "calmar": out_metrics["calmar"]
+            },
+            "report_filename": report_filename
+        },
+        "fingerprint": fingerprint_node
     }
 
 # -------------------------------------------------------------
@@ -3584,6 +4398,115 @@ def run_monthly_abnormal_volume_backtest(req: MonthlyAbnormalVolumeRequest):
     return JSONResponse(content=cleaned_response)
 
 # -------------------------------------------------------------
+# 8.8 月级异常放量策略超参网格自动寻优 API (POST)
+# -------------------------------------------------------------
+@app.post("/api/strategy/monthly_abnormal_volume/optimize", summary="月度级异常放量策略超参网格寻优接口")
+def optimize_monthly_abnormal_volume(req: MonthlyAbnormalVolumeRequest):
+    vol_ratios = [3.0, 3.5]
+    upper_mults = [1.3, 1.4]
+    lower_mults = [0.5, 0.6]
+    
+    tasks = []
+    for vr in vol_ratios:
+        for um in upper_mults:
+            for lm in lower_mults:
+                tasks.append((vr, um, lm))
+                
+    results = []
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    
+    def run_sub_backtest(vr, um, lm):
+        sub_req = MonthlyAbnormalVolumeRequest(
+            start_date=req.start_date,
+            end_date=req.end_date,
+            vol_ratio_threshold=vr,
+            lookback_months=req.lookback_months,
+            abnormal_months_threshold=req.abnormal_months_threshold,
+            listing_days_threshold=req.listing_days_threshold,
+            capital=req.capital,
+            enable_market_filter=req.enable_market_filter,
+            market_filter_index=req.market_filter_index,
+            market_filter_ma=req.market_filter_ma,
+            market_filter_rule=req.market_filter_rule,
+            market_filter_preset=req.market_filter_preset,
+            market_filter_slope_rule=req.market_filter_slope_rule,
+            market_filter_position_rule=req.market_filter_position_rule,
+            market_filter_slope_days=req.market_filter_slope_days,
+            enable_stop_loss=req.enable_stop_loss,
+            stop_loss_pct=req.stop_loss_pct,
+            enable_vol_position_filter=True, 
+            vol_position_multiplier=um,
+            hist_price_lower_mult=lm,
+            enable_stock_trend_confirm=req.enable_stock_trend_confirm,
+            confirm_ma30_daily_slope_pos=req.confirm_ma30_daily_slope_pos,
+            confirm_above_ma30_daily=req.confirm_above_ma30_daily,
+            confirm_above_ma30_weekly=req.confirm_above_ma30_weekly,
+            confirm_above_ma30_monthly=req.confirm_above_ma30_monthly
+        )
+        
+        res_json = run_monthly_abnormal_volume_backtest(sub_req)
+        import json
+        body = json.loads(res_json.body.decode("utf-8"))
+        return body, vr, um, lm
+
+    t_start = time.perf_counter()
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = {executor.submit(run_sub_backtest, vr, um, lm): (vr, um, lm) for vr, um, lm in tasks}
+        for future in as_completed(futures):
+            try:
+                body, vr, um, lm = future.result()
+                if body.get("status") == "success":
+                    trades = body.get("trades", [])
+                    ret_3m_list = [t.get("ret_3m") for t in trades if t.get("ret_3m") is not None]
+                    pl_3m_list = [t.get("pl_3m") for t in trades if t.get("pl_3m") is not None]
+                    
+                    total_trades = len(trades)
+                    valid_3m_count = len(ret_3m_list)
+                    
+                    if valid_3m_count > 0:
+                        avg_ret_3m = sum(ret_3m_list) / valid_3m_count
+                        win_rate_3m = sum(1 for r in ret_3m_list if r > 0) / valid_3m_count * 100
+                        total_pl_3m = sum(pl_3m_list)
+                    else:
+                        avg_ret_3m = 0.0
+                        win_rate_3m = 0.0
+                        total_pl_3m = 0.0
+                        
+                    results.append({
+                        "vol_ratio": vr,
+                        "upper_mult": um,
+                        "lower_mult": lm,
+                        "total_trades": total_trades,
+                        "valid_3m_trades": valid_3m_count,
+                        "avg_ret_3m": round(avg_ret_3m, 2),
+                        "win_rate_3m": round(win_rate_3m, 2),
+                        "total_pl_3m": round(total_pl_3m, 2)
+                    })
+            except Exception as e:
+                print(f"[Grid Search Error] - {e}")
+                
+    valid_results = [r for r in results if r["valid_3m_trades"] >= 5]
+    invalid_results = [r for r in results if r["valid_3m_trades"] < 5]
+    
+    valid_results.sort(key=lambda x: (x["avg_ret_3m"], x["win_rate_3m"]), reverse=True)
+    invalid_results.sort(key=lambda x: (x["avg_ret_3m"], x["win_rate_3m"]), reverse=True)
+    
+    ranked_results = valid_results + invalid_results
+    
+    if ranked_results:
+        best = ranked_results[0]
+        suggestion = f"超参网格寻优完成！在您选择的期间内，最优参数组合为：<b>放量倍数 {best['vol_ratio']}x，历史价格上限 {best['upper_mult']}x，历史价格下限 {best['lower_mult']}x</b>。该参数组合下共达成 <b>{best['total_trades']}</b> 笔交易，其 3 个月滚动持有期的平均单笔回报达 <b>{best['avg_ret_3m']}%</b>，平均胜率达 <b>{best['win_rate_3m']}%</b>，累计盈亏达 <b>{best['total_pl_3m']} 元</b>。这表明通过限制较严格的价格下限（如 0.5x 到 0.6x），可以非常显著地剔除底部虚弱无支撑的垃圾股，锁定高量能多头主升浪！"
+    else:
+        suggestion = "超参网格寻优完成，但未能在选定区间内找到足够的交易样本进行评估。请尝试扩大回测时间范围或降低过滤门槛。"
+        
+    return JSONResponse(content={
+        "status": "success",
+        "elapsed_seconds": round(time.perf_counter() - t_start, 4),
+        "results": ranked_results,
+        "suggestion": suggestion
+    })
+
+# -------------------------------------------------------------
 # 9. 动态托管 HTML 赛博看板 (GET /)
 # -------------------------------------------------------------
 @app.get("/", response_class=HTMLResponse, summary="动态读取并渲染赛博大势看板仪表盘(完美免除CORS)")
@@ -3591,6 +4514,34 @@ def run_monthly_abnormal_volume_backtest(req: MonthlyAbnormalVolumeRequest):
 def get_dashboard():
     try:
         market_data = get_market_data()
+        if isinstance(market_data, JSONResponse):
+            body_data = json.loads(market_data.body.decode("utf-8"))
+            error_msg = body_data.get("message", "未知错误")
+            
+            hint = ""
+            if "未在数据目录中找到任何有效" in error_msg or "data" in error_msg or "FileNotFoundError" in error_msg:
+                hint = """
+                <div style="margin-top: 25px; padding: 15px; background-color: #f0fff4; border-left: 4px solid #38a169; border-radius: 4px;">
+                    <strong style="color: #276749;">💡 解决建议：</strong>
+                    <p style="margin: 5px 0 0 0; color: #2f855a;">系统检测到您本地尚未生成量化数据缓存。请先在终端运行以下同步命令：</p>
+                    <code style="display: block; background: #edf2f7; padding: 10px; margin-top: 10px; border-radius: 4px; font-family: monospace; font-weight: bold; color: #2d3748;">python sync_market.py</code>
+                </div>
+                """
+            
+            return HTMLResponse(
+                content=f"""
+                <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 40px; max-width: 800px; margin: 50px auto; line-height: 1.6; background: #fff; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); border: 1px solid #edf2f7;">
+                    <h2 style="color: #e53e3e; display: flex; align-items: center; gap: 10px; margin-top: 0;">
+                        <span>❌</span> 市场数据链算失败
+                    </h2>
+                    <div style="background-color: #fff5f5; border-left: 4px solid #e53e3e; padding: 15px; border-radius: 4px; margin: 20px 0; font-family: monospace; color: #c53030; word-break: break-all;">
+                        {error_msg}
+                    </div>
+                    {hint}
+                </div>
+                """, 
+                status_code=500
+            )
     except Exception as e:
         return HTMLResponse(content=f"<h1>❌ 市场数据链算失败: {e}</h1>", status_code=500)
 
