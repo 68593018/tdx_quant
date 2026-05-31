@@ -116,9 +116,8 @@ def sync_all_industries(tdx_dir: str, output_parquet_path: str):
         
         if in_section and "|" in line:
             code, name = line.split("|", 1)
-            if len(code) == 5:
-                industry_names[code] = name
-                
+            industry_names[code] = name
+                 
     # 2. 解析 tdxhy.cfg
     results = []
     with open(hy_path, "r", encoding="utf-8") as f:
@@ -126,14 +125,29 @@ def sync_all_industries(tdx_dir: str, output_parquet_path: str):
             parts = line.strip().split("|")
             if len(parts) >= 3:
                 market_id, code, hy_code = parts[0], parts[1], parts[2]
-                if len(hy_code) >= 5:
-                    hy_level2 = hy_code[:5]
+                if len(hy_code) >= 3:
                     market = "sz" if market_id == "0" else ("sh" if market_id == "1" else "bj")
-                    name = industry_names.get(hy_level2, "其它行业")
+                    symbol = f"{market}{code}"
+                    
+                    lvl1_code = hy_code[:3]
+                    lvl2_code = hy_code[:5] if len(hy_code) >= 5 else None
+                    lvl3_code = hy_code[:7] if len(hy_code) >= 7 else None
+                    
+                    lvl1_name = industry_names.get(lvl1_code, "其它一级行业")
+                    lvl2_name = industry_names.get(lvl2_code, "其它二级行业") if lvl2_code else None
+                    lvl3_name = industry_names.get(lvl3_code, None) if lvl3_code else None
+                    
+                    # 保持行业名称与行业代码的向下兼容
                     results.append({
-                        "symbol": f"{market}{code}",
-                        "industry_code": hy_level2,
-                        "industry_name": name
+                        "symbol": symbol,
+                        "industry_code": lvl2_code if lvl2_code else lvl1_code,
+                        "industry_name": lvl2_name if lvl2_name else lvl1_name,
+                        "lvl1_code": lvl1_code,
+                        "lvl1_name": lvl1_name,
+                        "lvl2_code": lvl2_code,
+                        "lvl2_name": lvl2_name,
+                        "lvl3_code": lvl3_code,
+                        "lvl3_name": lvl3_name
                     })
                     
     df = pd.DataFrame(results)

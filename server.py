@@ -198,6 +198,8 @@ def load_stock_names(tdx_dir: str) -> dict:
     return names_map
 
 _STOCK_NAMES_CACHE = []
+_SECTOR_NAMES_CACHE = None
+_GBBQ_SHARES_CACHE = None
 
 LEVEL2_CHAR_MAP = {
     "亳": "b",
@@ -468,6 +470,254 @@ def get_stock_names_with_initials():
     _STOCK_NAMES_CACHE = cache
     return cache
 
+def get_gbbq_shares_cache():
+    global _GBBQ_SHARES_CACHE
+    if _GBBQ_SHARES_CACHE is not None:
+        return _GBBQ_SHARES_CACHE
+    
+    tdx_dir = load_tdx_dir()
+    gbbq_path = os.path.join(tdx_dir, "T0002", "hq_cache", "gbbq")
+    if not os.path.exists(gbbq_path):
+        return {}
+        
+    cache_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "storage")
+    os.makedirs(cache_dir, exist_ok=True)
+    cache_path = os.path.join(cache_dir, "gbbq_shares_cache.pkl")
+    
+    # 检查是否有现成的 pickle 缓存且缓存文件新于原始 gbbq 二进制文件
+    if os.path.exists(gbbq_path):
+        gbbq_mtime = os.path.getmtime(gbbq_path)
+        if os.path.exists(cache_path) and os.path.getmtime(cache_path) >= gbbq_mtime:
+            try:
+                import pickle
+                with open(cache_path, 'rb') as f:
+                    _GBBQ_SHARES_CACHE = pickle.load(f)
+                print("⚡ [GBBQ] 股本变迁缓存从 pickle 极速加载成功！")
+                return _GBBQ_SHARES_CACHE
+            except Exception as e:
+                print(f"⚠️ 警告: 读取 GBBQ pickle 缓存失败: {e}，将重新解析二进制文件...")
+                
+    try:
+        from parser.gbbq import parse_tdx_gbbq_file
+        print("⏳ [GBBQ] 正在解析 GBBQ 原始二进制文件 (首轮加载需要 20~40 秒，后续将极速缓存)...")
+        gbbq_df = parse_tdx_gbbq_file(gbbq_path)
+        shares_df = gbbq_df[gbbq_df['category'] != 1].copy()
+        gbbq_map = {}
+        for code, group in shares_df.groupby('code'):
+            group_sorted = group.sort_values('date')
+            gbbq_map[code] = list(zip(group_sorted['date'], group_sorted['allocated_ratio']))
+        _GBBQ_SHARES_CACHE = gbbq_map
+        
+        # 序列化为 pickle 以便下次瞬时读取
+        try:
+            import pickle
+            with open(cache_path, 'wb') as f:
+                pickle.dump(gbbq_map, f)
+            print("💾 [GBBQ] 股本变迁缓存已写入 pickle，后续加载将瞬时完成！")
+        except Exception as e:
+            print(f"⚠️ 警告: 写入 GBBQ pickle 缓存失败: {e}")
+            
+        return gbbq_map
+    except Exception as e:
+        print(f"Error loading GBBQ in server: {e}")
+        return {}
+
+def lookup_circulating_shares(gbbq_shares, symbol, target_date):
+    """根据股票代码与目标日期，在 GBBQ 缓存中精确检索出当时的流通股数（股）"""
+    code = symbol[-6:]
+    if not gbbq_shares or code not in gbbq_shares:
+        return 3e5  # 默认一个安全的均值近似值 (万股) = 3亿股
+        
+    records = gbbq_shares[code]
+    float_shares_wan = None
+    
+    # 兼容传入 datetime.date 或 Timestamp 或 str
+    if isinstance(target_date, str):
+        target_date_str = target_date[:10]
+        from datetime import datetime
+        try:
+            target_date_dt = datetime.strptime(target_date_str, "%Y-%m-%d").date()
+        except:
+            return 3e5
+    elif hasattr(target_date, 'date'):
+        target_date_dt = target_date.date()
+    else:
+        target_date_dt = target_date
+        
+    for r_date, r_shares in records:
+        r_date_dt = r_date.date() if hasattr(r_date, 'date') else r_date
+        if r_date_dt <= target_date_dt:
+            float_shares_wan = r_shares
+        else:
+            break
+            
+    if float_shares_wan is not None and float_shares_wan > 0:
+        return float_shares_wan
+        
+    return 3e5
+
+def get_sector_names_with_initials():
+    global _SECTOR_NAMES_CACHE
+    if _SECTOR_NAMES_CACHE is not None:
+        return _SECTOR_NAMES_CACHE
+    
+    con = duckdb.connect()
+    
+    # 1. 加载行业板块 (支持二级、三级层级)
+    industries = []
+    if os.path.exists(INDUSTRY_MAPPINGS_PATH):
+        try:
+            industry_mappings_path_norm = INDUSTRY_MAPPINGS_PATH.replace('\\', '/')
+            
+            # 检查 parquet 是否包含树状分级列
+            cols_df = con.execute(f"DESCRIBE SELECT * FROM read_parquet('{industry_mappings_path_norm}') LIMIT 1").fetchdf()
+            cols = cols_df['column_name'].tolist()
+            
+            if 'lvl2_name' in cols and 'lvl3_name' in cols:
+                # 1a. 读取二级行业 (lvl2_name)
+                df_lvl2 = con.execute(f"SELECT DISTINCT lvl2_name FROM read_parquet('{industry_mappings_path_norm}') WHERE lvl2_name IS NOT NULL").fetchdf()
+                for name in df_lvl2['lvl2_name'].tolist():
+                    if not name or not name.strip():
+                        continue
+                    initials = get_pinyin_initials(name)
+                    initials_alt = None
+                    if "行" in name:
+                        initials_alt = initials.replace('x', 'h')
+                    elif "重" in name:
+                        initials_alt = initials.replace('z', 'c')
+                    elif "长" in name:
+                        initials_alt = initials.replace('z', 'c')
+                    
+                    industries.append({
+                        "name": name,
+                        "level": 2,
+                        "parent": None,
+                        "initials": initials,
+                        "initials_alt": initials_alt
+                    })
+                
+                # 1b. 读取三级行业 (lvl3_name)
+                df_lvl3 = con.execute(f"SELECT DISTINCT lvl3_name, lvl2_name FROM read_parquet('{industry_mappings_path_norm}') WHERE lvl3_name IS NOT NULL").fetchdf()
+                for _, row in df_lvl3.iterrows():
+                    name = row['lvl3_name']
+                    parent = row['lvl2_name']
+                    if not name or not name.strip():
+                        continue
+                    initials = get_pinyin_initials(name)
+                    initials_alt = None
+                    if "行" in name:
+                        initials_alt = initials.replace('x', 'h')
+                    elif "重" in name:
+                        initials_alt = initials.replace('z', 'c')
+                    elif "长" in name:
+                        initials_alt = initials.replace('z', 'c')
+                    
+                    industries.append({
+                        "name": name,
+                        "level": 3,
+                        "parent": parent,
+                        "initials": initials,
+                        "initials_alt": initials_alt
+                    })
+            else:
+                # 兼容旧版本单层级映射
+                df_ind = con.execute(f"SELECT DISTINCT industry_name FROM read_parquet('{industry_mappings_path_norm}') WHERE industry_name IS NOT NULL").fetchdf()
+                for name in df_ind['industry_name'].tolist():
+                    if not name or not name.strip():
+                        continue
+                    initials = get_pinyin_initials(name)
+                    initials_alt = None
+                    if "行" in name:
+                        initials_alt = initials.replace('x', 'h')
+                    elif "重" in name:
+                        initials_alt = initials.replace('z', 'c')
+                    elif "长" in name:
+                        initials_alt = initials.replace('z', 'c')
+                    
+                    industries.append({
+                        "name": name,
+                        "level": 2,
+                        "parent": None,
+                        "initials": initials,
+                        "initials_alt": initials_alt
+                    })
+        except Exception as e:
+            print(f"Error loading industries for search: {e}")
+            
+    # 2. 加载概念板块
+    concepts = []
+    if os.path.exists(BLOCK_MAPPINGS_PATH):
+        try:
+            block_mappings_path_norm = BLOCK_MAPPINGS_PATH.replace('\\', '/')
+            df_con = con.execute(f"SELECT DISTINCT block_name FROM read_parquet('{block_mappings_path_norm}') WHERE block_category = 'concept' AND block_name IS NOT NULL").fetchdf()
+            for name in df_con['block_name'].tolist():
+                if not name or not name.strip():
+                    continue
+                initials = get_pinyin_initials(name)
+                initials_alt = None
+                if "行" in name:
+                    initials_alt = initials.replace('x', 'h')
+                elif "重" in name:
+                    initials_alt = initials.replace('z', 'c')
+                elif "长" in name:
+                    initials_alt = initials.replace('z', 'c')
+                
+                concepts.append({
+                    "name": name,
+                    "initials": initials,
+                    "initials_alt": initials_alt
+                })
+        except Exception as e:
+            print(f"Error loading concepts for search: {e}")
+            
+    _SECTOR_NAMES_CACHE = {
+        "industry": industries,
+        "concept": concepts
+    }
+    return _SECTOR_NAMES_CACHE
+
+def process_flow_data_single(df, name_col, target_name) -> dict:
+    """处理单个板块的资金流向 DataFrame，提取指定周期的时序数据"""
+    if df.empty:
+        return {"dates": [], "series": []}
+    
+    df['date_str'] = df['date'].apply(lambda x: x.strftime('%Y-%m-%d') if (pd.notnull(x) and hasattr(x, 'strftime')) else (str(x)[:10] if pd.notnull(x) else ""))
+    dates = sorted(list(df['date_str'].unique()))
+    
+    if not dates:
+        return {"dates": [], "series": []}
+        
+    lookup = {}
+    for _, row in df.iterrows():
+        turnover_val = float(row['sector_turnover']) if 'sector_turnover' in row else 0.0
+        lookup[row['date_str']] = (
+            float(row['sector_amount']) / 1e8,  # 亿元
+            float(row['sector_ratio']),
+            turnover_val
+        )
+        
+    amount_history = []
+    ratio_history = []
+    turnover_history = []
+    for d in dates:
+        val = lookup.get(d, (0.0, 0.0, 0.0))
+        amount_history.append(round(val[0], 2))
+        ratio_history.append(round(val[1], 4))
+        turnover_history.append(round(val[2], 4))
+        
+    series = [{
+        "name": target_name,
+        "type": "custom",
+        "amount": amount_history,
+        "ratio": ratio_history,
+        "turnover": turnover_history
+    }]
+        
+    return {
+        "dates": dates,
+        "series": series
+    }
+
 def load_strategies() -> dict:
     """动态载入 strategies.json 并自动做 Windows 路径正则兼容"""
     if not os.path.exists(STRATEGIES_PATH):
@@ -713,6 +963,282 @@ def search_stocks(q: str = ""):
         "count": len(results),
         "results": results
     })
+
+@app.get("/api/market/sector_search", summary="板块名称/拼音首字母智能联想推荐")
+def search_sectors(q: str = ""):
+    q = q.strip().lower()
+    if not q:
+        return JSONResponse(content={"status": "success", "results": []})
+        
+    try:
+        sectors = get_sector_names_with_initials()
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"status": "error", "message": f"加载板块列表失败: {e}"})
+        
+    results = []
+    
+    # 行业板块
+    for s in sectors["industry"]:
+        match = False
+        if q in s["name"].lower():
+            match = True
+        elif s["initials"].startswith(q) or (s["initials_alt"] and s["initials_alt"].startswith(q)):
+            match = True
+            
+        if match:
+            results.append({
+                "name": s["name"],
+                "type": "industry",
+                "pinyin": s["initials"]
+            })
+            
+    # 概念板块
+    for s in sectors["concept"]:
+        match = False
+        if q in s["name"].lower():
+            match = True
+        elif s["initials"].startswith(q) or (s["initials_alt"] and s["initials_alt"].startswith(q)):
+            match = True
+            
+        if match:
+            results.append({
+                "name": s["name"],
+                "type": "concept",
+                "pinyin": s["initials"]
+            })
+            
+    results = results[:15]
+    return JSONResponse(content={
+        "status": "success",
+        "count": len(results),
+        "results": results
+    })
+
+@app.get("/api/market/custom_sector_flow", summary="获取指定板块指定周期的资金流向曲线数据")
+def get_custom_sector_flow(sector_name: str, type: str = "industry", limit: int = 30, start_date: str = None, end_date: str = None):
+    industry_mappings_path_norm = INDUSTRY_MAPPINGS_PATH.replace('\\', '/')
+    block_mappings_path_norm = BLOCK_MAPPINGS_PATH.replace('\\', '/')
+    
+    try:
+        patterns_str = get_parquet_patterns()
+        
+        con = duckdb.connect()
+        con.execute(f"SET threads = {os.cpu_count()}")
+        default_stock_filter = "(filename LIKE '%sh60%' OR filename LIKE '%sh68%' OR filename LIKE '%sz00%' OR filename LIKE '%sz30%' OR filename LIKE '%/bj%')"
+        
+        # 1. 确定日期范围 (支持 YYYY-MM 月级别选择，自动展开为该月首日和末日)
+        if start_date and end_date:
+            if len(start_date) == 7:  # YYYY-MM
+                start_date = f"{start_date}-01"
+            if len(end_date) == 7:  # YYYY-MM
+                from calendar import monthrange
+                year, month = map(int, end_date.split('-'))
+                last_day = monthrange(year, month)[1]
+                end_date = f"{end_date}-{last_day}"
+                
+            date_sql = f"""
+                SELECT DISTINCT date 
+                FROM read_parquet('{DATA_STORE_DIR}/sh600000.parquet')
+                WHERE date >= '{start_date}' AND date <= '{end_date}'
+                ORDER BY date DESC
+            """
+        else:
+            if limit < 30:
+                limit = 30
+            elif limit > 240:
+                limit = 240
+            date_sql = f"""
+                SELECT DISTINCT date 
+                FROM read_parquet('{DATA_STORE_DIR}/sh600000.parquet')
+                ORDER BY date DESC
+                LIMIT {limit}
+            """
+        df_dates = con.execute(date_sql).fetchdf()
+        if df_dates.empty:
+            return {"status": "success", "data": {"dates": [], "series": []}}
+            
+        dates_list = df_dates['date'].tolist()
+        min_date = min(dates_list).strftime('%Y-%m-%d')
+        max_date = max(dates_list).strftime('%Y-%m-%d')
+        
+        df_dates['date_str'] = df_dates['date'].apply(lambda x: x.strftime('%Y-%m-%d') if hasattr(x, 'strftime') else str(x)[:10])
+        sorted_dates = sorted(df_dates['date_str'].tolist())
+        
+        # 2. 获取板块中所有股票的代码/符号
+        if type == "industry":
+            cols_df = con.execute(f"DESCRIBE SELECT * FROM read_parquet('{industry_mappings_path_norm}') LIMIT 1").fetchdf()
+            cols = cols_df['column_name'].tolist()
+            
+            if 'lvl2_name' in cols and 'lvl3_name' in cols:
+                # 兼容二三级层级：如果选择二级，匹配二级；如果选择三级，匹配三级
+                map_sql = f"""
+                    SELECT symbol
+                    FROM read_parquet('{industry_mappings_path_norm}')
+                    WHERE lvl2_name = '{sector_name}' OR lvl3_name = '{sector_name}'
+                """
+            else:
+                # 旧单级兼容
+                map_sql = f"""
+                    SELECT symbol
+                    FROM read_parquet('{industry_mappings_path_norm}')
+                    WHERE industry_name = '{sector_name}'
+                """
+            df_mapping = con.execute(map_sql).fetchdf()
+        else: # 概念板块
+            map_sql = f"""
+                SELECT code, market 
+                FROM read_parquet('{block_mappings_path_norm}')
+                WHERE block_category = 'concept' AND block_name = '{sector_name}'
+            """
+            df_symbols = con.execute(map_sql).fetchdf()
+            if df_symbols.empty:
+                return {"status": "error", "message": f"未找到概念板块: {sector_name}"}
+            df_mapping = df_symbols.copy()
+            df_mapping['symbol'] = df_symbols.apply(lambda r: f"{r['market']}{r['code']}", axis=1)
+            
+        if df_mapping.empty:
+            return {"status": "success", "data": {"dates": sorted_dates, "series": []}}
+            
+        # 3. 筛选真实存在的文件路径，只读取这部分个股的成交额与成交量
+        df_mapping['filepath'] = df_mapping['symbol'].apply(lambda sym: os.path.join(DATA_STORE_DIR, f"{sym}.parquet").replace('\\', '/'))
+        df_mapping['exists'] = df_mapping['filepath'].apply(lambda p: os.path.exists(p))
+        df_mapping = df_mapping[df_mapping['exists']].copy()
+        
+        if df_mapping.empty:
+            return {"status": "success", "data": {"dates": sorted_dates, "series": []}}
+            
+        all_filepaths = df_mapping['filepath'].tolist()
+        filepaths_str = ", ".join(f"'{f}'" for f in all_filepaths)
+        
+        # 4. 高效读取大盘总金额
+        market_sql = f"""
+            SELECT date, SUM(amount) AS market_total_amount
+            FROM read_parquet([{patterns_str}], filename=true)
+            WHERE date >= '{min_date}' AND date <= '{max_date}'
+            AND {default_stock_filter}
+            GROUP BY date
+        """
+        df_market = con.execute(market_sql).fetchdf()
+        df_market['date_str'] = df_market['date'].apply(lambda x: x.strftime('%Y-%m-%d') if hasattr(x, 'strftime') else str(x)[:10])
+        market_lookup = dict(zip(df_market['date_str'], df_market['market_total_amount']))
+        
+        # 5. 单次拉取选定板块个股的日线数据 (新增拉取复权价格 close_adj 用于计算板块价格指数)
+        stock_data_sql = f"""
+            SELECT regexp_extract(filename, '([^/\\\\\\\\]+)[.]parquet$', 1) AS symbol,
+                   date, amount, volume, close_adj
+            FROM read_parquet([{filepaths_str}], filename=true)
+            WHERE date >= '{min_date}' AND date <= '{max_date}'
+        """
+        df_stocks = con.execute(stock_data_sql).fetchdf()
+        
+        if df_stocks.empty:
+            return {"status": "success", "data": {"dates": sorted_dates, "series": []}}
+            
+        df_stocks['date_str'] = df_stocks['date'].apply(lambda x: x.strftime('%Y-%m-%d') if hasattr(x, 'strftime') else str(x)[:10])
+        
+        # 加载 GBBQ 变动缓存并计算历史流通股数
+        gbbq_shares = get_gbbq_shares_cache()
+        df_stocks['circulating_shares'] = df_stocks.apply(
+            lambda row: lookup_circulating_shares(gbbq_shares, row['symbol'], row['date']) * 10000.0, axis=1
+        )
+        
+        # 计算流通市值 close_adj * circulating_shares 用于后续加权价格指数
+        df_stocks['close_adj_x_shares'] = df_stocks['close_adj'] * df_stocks['circulating_shares']
+        
+        # 按日汇总该板块数据
+        df_daily = df_stocks.groupby('date_str').agg(
+            sector_amount=('amount', 'sum'),
+            total_volume=('volume', 'sum'),
+            total_shares=('circulating_shares', 'sum'),
+            cap_weighted_price_sum=('close_adj_x_shares', 'sum')
+        ).reset_index()
+        
+        # 计算板块价格指数 (流通市值加权平均价格)
+        df_daily['price_index'] = df_daily['cap_weighted_price_sum'] / df_daily['total_shares'].replace(0, 1.0)
+        
+        # 合并大盘成交额并计算资金占比 (sector_ratio)
+        df_daily = pd.merge(df_daily, df_market[['date_str', 'market_total_amount']], on='date_str', how='left')
+        df_daily['sector_ratio'] = df_daily['sector_amount'] * 100.0 / df_daily['market_total_amount'].fillna(1.0)
+        
+        # 6. 计算顶背离与底背离 (滑动观察窗口 N = 30)
+        df_daily = df_daily.sort_values('date_str').reset_index(drop=True)
+        window = min(30, len(df_daily))
+        
+        if window >= 3:
+            df_daily['price_max'] = df_daily['price_index'].rolling(window, min_periods=1).max()
+            df_daily['price_min'] = df_daily['price_index'].rolling(window, min_periods=1).min()
+            df_daily['ratio_max'] = df_daily['sector_ratio'].rolling(window, min_periods=1).max()
+            df_daily['ratio_min'] = df_daily['sector_ratio'].rolling(window, min_periods=1).min()
+            
+            # 价格创新高，但资金流入占比未创新高 (顶背离)
+            df_daily['top_divergence'] = (df_daily['price_index'] == df_daily['price_max']) & (df_daily['sector_ratio'] < df_daily['ratio_max'])
+            
+            # 价格创新低，但资金流入占比未创新低 (底背离)
+            df_daily['bottom_divergence'] = (df_daily['price_index'] == df_daily['price_min']) & (df_daily['sector_ratio'] > df_daily['ratio_min'])
+            
+            # 屏蔽前 5 天的过渡期信号，使其更稳定可靠
+            if len(df_daily) > 5:
+                df_daily.loc[:4, 'top_divergence'] = False
+                df_daily.loc[:4, 'bottom_divergence'] = False
+        else:
+            df_daily['top_divergence'] = False
+            df_daily['bottom_divergence'] = False
+            
+        # 7. 构建序列字典并输出
+        daily_lookup = {}
+        for _, r in df_daily.iterrows():
+            d_str = r['date_str']
+            denom = r['total_shares'] if r['total_shares'] > 0 else 1.0
+            turnover = r['total_volume'] * 100.0 / denom
+            
+            daily_lookup[d_str] = (
+                float(r['sector_amount']) / 1e8,  # 亿元
+                float(r['sector_ratio']),
+                float(turnover),
+                bool(r['top_divergence']),
+                bool(r['bottom_divergence'])
+            )
+            
+        amount_history = []
+        ratio_history = []
+        turnover_history = []
+        top_div_history = []
+        bottom_div_history = []
+        
+        for d in sorted_dates:
+            val = daily_lookup.get(d, (0.0, 0.0, 0.0, False, False))
+            amount_history.append(round(val[0], 2))
+            ratio_history.append(round(val[1], 4))
+            turnover_history.append(round(val[2], 4))
+            top_div_history.append(val[3])
+            bottom_div_history.append(val[4])
+            
+        series = [{
+            "name": sector_name,
+            "type": "custom",
+            "amount": amount_history,
+            "ratio": ratio_history,
+            "turnover": turnover_history,
+            "top_divergence": top_div_history,
+            "bottom_divergence": bottom_div_history
+        }]
+        
+        return {"status": "success", "data": {"dates": sorted_dates, "series": series}}
+        
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"status": "error", "message": f"获取指定板块资金流向数据失败: {e}"})
+
+@app.get("/strategies.json", summary="获取原始策略配置文件")
+def get_raw_strategies_json():
+    if os.path.exists(STRATEGIES_PATH):
+        try:
+            with open(STRATEGIES_PATH, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return JSONResponse(content=data)
+        except Exception as e:
+            return JSONResponse(status_code=500, content={"status": "error", "message": f"加载 strategies.json 失败: {e}"})
+    return JSONResponse(status_code=404, content={"status": "error", "message": "File not found"})
+
 
 @app.get("/api/strategies", summary="列出所有可用的选股及分析策略")
 def get_all_strategies():
@@ -3041,12 +3567,7 @@ def optimize_stock_bias(symbol: str):
     }
 
 @app.get("/api/market/sector_flow", summary="获取指定周期的行业或概念板块资金流向时序图与领涨领跌曲线数据")
-def get_sector_flow(type: str = "industry", limit: int = 30):
-    if limit < 30:
-        limit = 30
-    elif limit > 240:
-        limit = 240
-        
+def get_sector_flow(type: str = "industry", limit: int = 30, start_date: str = None, end_date: str = None):
     try:
         strategies = load_strategies()
         patterns_str = get_parquet_patterns()
@@ -3056,22 +3577,48 @@ def get_sector_flow(type: str = "industry", limit: int = 30):
         
         default_stock_filter = "(filename LIKE '%sh60%' OR filename LIKE '%sh68%' OR filename LIKE '%sz00%' OR filename LIKE '%sz30%' OR filename LIKE '%/bj%')"
         
+        if start_date and end_date:
+            dates_replacement = f"""WITH latest_dates AS (
+                SELECT DISTINCT date 
+                FROM read_parquet('{DATA_STORE_DIR}/sh600000.parquet')
+                WHERE date >= '{start_date}' AND date <= '{end_date}'
+                ORDER BY date DESC
+            ),"""
+        else:
+            if limit < 30:
+                limit = 30
+            elif limit > 240:
+                limit = 240
+            dates_replacement = f"""WITH latest_dates AS (
+                SELECT DISTINCT date 
+                FROM read_parquet('{DATA_STORE_DIR}/sh600000.parquet')
+                ORDER BY date DESC
+                LIMIT {limit}
+            ),"""
+
+        old_dates_cte = """WITH latest_dates AS (
+    SELECT DISTINCT date 
+    FROM read_parquet('__DATA_STORE_DIR__/sh600000.parquet')
+    ORDER BY date DESC
+    LIMIT 30
+),"""
+
         if type == "industry":
-            sql = strategies["industry_flow_30d"]["query_sql"]\
-                .replace("__DATA_STORE_DIR__", DATA_STORE_DIR)\
-                .replace("__PATTERNS_STR__", patterns_str)\
-                .replace("__INDUSTRY_MAPPINGS_PATH__", INDUSTRY_MAPPINGS_PATH)\
-                .replace("__CATEGORY_FILTER__", default_stock_filter)\
-                .replace("LIMIT 30", f"LIMIT {limit}")
+            raw_sql = strategies["industry_flow_30d"]["query_sql"]
+            sql = raw_sql.replace("__DATA_STORE_DIR__", DATA_STORE_DIR)\
+                         .replace("__PATTERNS_STR__", patterns_str)\
+                         .replace("__INDUSTRY_MAPPINGS_PATH__", INDUSTRY_MAPPINGS_PATH)\
+                         .replace("__CATEGORY_FILTER__", default_stock_filter)
+            sql = sql.replace(old_dates_cte, dates_replacement)
             df = con.execute(sql).fetchdf()
             res = process_flow_data(df, 'industry_name')
         else:
-            sql = strategies["concept_flow_30d"]["query_sql"]\
-                .replace("__DATA_STORE_DIR__", DATA_STORE_DIR)\
-                .replace("__PATTERNS_STR__", patterns_str)\
-                .replace("__BLOCK_MAPPINGS_PATH__", BLOCK_MAPPINGS_PATH)\
-                .replace("__CATEGORY_FILTER__", default_stock_filter)\
-                .replace("LIMIT 30", f"LIMIT {limit}")
+            raw_sql = strategies["concept_flow_30d"]["query_sql"]
+            sql = raw_sql.replace("__DATA_STORE_DIR__", DATA_STORE_DIR)\
+                         .replace("__PATTERNS_STR__", patterns_str)\
+                         .replace("__BLOCK_MAPPINGS_PATH__", BLOCK_MAPPINGS_PATH)\
+                         .replace("__CATEGORY_FILTER__", default_stock_filter)
+            sql = sql.replace(old_dates_cte, dates_replacement)
             df = con.execute(sql).fetchdf()
             res = process_flow_data(df, 'block_name')
             

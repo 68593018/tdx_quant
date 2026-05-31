@@ -823,8 +823,117 @@
                             </div>
                         </div>
                     </div>
-                    <div class="chart-box w-full h-[450px]" id="chart-flow-trend"></div>
+                    <div class="relative w-full h-[450px]">
+                        <div v-if="mainFlowLoading" class="absolute inset-0 bg-[#0d1423]/50 flex items-center justify-center rounded-xl z-10 backdrop-blur-sm">
+                            <div class="text-xs text-cyber-primary flex items-center gap-2">
+                                <span class="animate-spin">🔄</span> 正在加载板块数据...
+                            </div>
+                        </div>
+                        <div class="chart-box w-full h-full" id="chart-flow-trend"></div>
+                    </div>
                 </div>
+                <!-- 🎯 指定板块资金流向时序图 (30~240日) -->
+                <div class="glass-card rounded-2xl p-6 space-y-6">
+                    <div class="flex justify-between items-center flex-wrap gap-4 border-b border-white/5 pb-4">
+                        <div class="chart-title text-sm font-semibold flex items-center gap-2" style="border:none; margin:0; padding:0;">
+                            <span>🎯</span> 指定板块资金流向时序分析曲线图
+                        </div>
+                        <div class="flex gap-4 flex-wrap text-xs">
+                            <!-- 开始日期/结束日期选择器 -->
+                            <div class="flex items-center gap-2 bg-[#0d1423] px-2.5 py-1 border border-cyber-border rounded-lg text-cyber-textMuted">
+                                <span>📅 时间范围:</span>
+                                <input type="month" v-model="customSectorStartDate" @change="fetchCustomSectorFlowData" class="bg-transparent text-white font-bold border-none focus:outline-none cursor-pointer text-xs" style="color-scheme: dark;">
+                                <span>至</span>
+                                <input type="month" v-model="customSectorEndDate" @change="fetchCustomSectorFlowData" class="bg-transparent text-white font-bold border-none focus:outline-none cursor-pointer text-xs" style="color-scheme: dark;">
+                            </div>
+                            
+                            <!-- 指标选择器 -->
+                            <div class="flex gap-1 bg-[#0d1423] p-1 border border-cyber-border rounded-lg">
+                                <button @click="switchCustomFlowMetric('ratio')" :class="['px-3 py-1.5 rounded-md font-semibold transition-all', customSectorMetric === 'ratio' ? 'bg-cyber-primary/20 text-cyber-primary border border-cyber-primary/25' : 'text-cyber-textMuted']">相对资金占比 (%)</button>
+                                <button @click="switchCustomFlowMetric('amount')" :class="['px-3 py-1.5 rounded-md font-semibold transition-all', customSectorMetric === 'amount' ? 'bg-cyber-primary/20 text-cyber-primary border border-cyber-primary/25' : 'text-cyber-textMuted']">绝对交易金额 (亿元)</button>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="flex flex-col md:flex-row gap-6">
+                        <!-- 搜索与控制面板 -->
+                        <div class="w-full md:w-80 space-y-4">
+                            <div>
+                                <label class="block text-xs font-semibold text-cyber-textMuted mb-2">🔍 选择/搜索板块 (支持拼音首字母)</label>
+                                <div class="relative">
+                                    <input type="text" 
+                                           v-model="sectorSearchQuery" 
+                                           @input="onSectorSearchInput"
+                                           @focus="onSectorSearchInput"
+                                           @blur="hideSectorSuggestionsWithDelay"
+                                           placeholder="输入拼音首字母或中文，如 bdt 或 半导体" 
+                                           class="w-full bg-cyber-base/80 border border-cyber-border rounded-xl px-4 py-2.5 text-xs focus:outline-none focus:border-cyber-primary transition-all font-mono text-white">
+                                    
+                                    <!-- 🎯 智能联想推荐浮层 -->
+                                    <div v-if="showSectorSuggestions && suggestedSectors.length > 0" 
+                                         class="absolute top-full left-0 right-0 mt-1.5 glass-card rounded-xl border border-cyber-primary/20 bg-[#0d1423] shadow-2xl z-50 max-h-56 overflow-y-auto divide-y divide-white/5">
+                                        <div v-for="sec in suggestedSectors" 
+                                             :key="sec.name"
+                                             @mousedown="selectSectorSuggestion(sec)"
+                                             class="px-4 py-2.5 flex items-center justify-between text-xs cursor-pointer hover:bg-cyber-primary/10 transition-all select-none">
+                                            <div class="flex items-center gap-2">
+                                                <span class="font-semibold text-white">{{ sec.name }}</span>
+                                                <span class="text-[10px] text-cyber-textMuted bg-white/5 px-1.5 py-0.5 rounded font-mono uppercase">{{ sec.type === 'industry' ? '行业' : '概念' }}</span>
+                                            </div>
+                                            <span class="text-[10px] text-cyber-textMuted uppercase font-mono font-bold">{{ sec.pinyin }}</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- 已选板块列表 -->
+                            <div class="space-y-2">
+                                <span class="block text-xs font-semibold text-cyber-textMuted">📌 当前对比板块 (最多5个)</span>
+                                <div v-if="selectedSectors.length === 0" class="text-xs text-cyber-textMuted italic py-2">
+                                    尚未选择板块，请在上方搜索并添加
+                                </div>
+                                <div v-else class="flex flex-wrap gap-2">
+                                    <div v-for="sec in selectedSectors" 
+                                         :key="sec.name" 
+                                         class="flex items-center gap-1.5 bg-cyber-primary/10 border border-cyber-primary/20 text-cyber-primary text-xs px-2.5 py-1.5 rounded-lg font-medium group transition-all hover:bg-cyber-primary/15">
+                                        <span>{{ sec.name }}</span>
+                                        <span class="text-[9px] text-cyber-textMuted font-mono">({{ sec.type === 'industry' ? '行' : '概' }})</span>
+                                        <button @click="removeSelectedSector(sec)" class="text-cyber-textMuted hover:text-cyber-up ml-1 focus:outline-none">✕</button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div v-if="customSectorError" class="text-xs text-cyber-up">
+                                ⚠️ {{ customSectorError }}
+                            </div>
+                        </div>
+                        
+                        <!-- 趋势折线图与换手率时序图 -->
+                        <div class="flex-1 space-y-6 relative">
+                            <div v-if="customSectorLoading" class="absolute inset-0 bg-[#0d1423]/50 flex items-center justify-center rounded-xl z-10 backdrop-blur-sm">
+                                <div class="text-xs text-cyber-primary flex items-center gap-2">
+                                    <span class="animate-spin">🔄</span> 正在加载板块数据...
+                                </div>
+                            </div>
+                            <div v-if="selectedSectors.length === 0" class="absolute inset-0 flex items-center justify-center text-xs text-cyber-textMuted">
+                                请在左侧选择板块以显示数据
+                            </div>
+                            
+                            <!-- 资金流向折线图 -->
+                            <div class="space-y-2">
+                                <span class="block text-[10px] font-semibold text-cyber-textMuted uppercase tracking-wider">🌊 板块资金流向时序图 (相对占比 % / 绝对金额 亿)</span>
+                                <div class="w-full h-[260px]" id="chart-custom-sector-flow"></div>
+                            </div>
+                            
+                            <!-- 换手率折线图 -->
+                            <div class="space-y-2 border-t border-white/5 pt-4">
+                                <span class="block text-[10px] font-semibold text-cyber-textMuted uppercase tracking-wider">📊 板块日均换手率时序对比图 (成交量/流通股数 %)</span>
+                                <div class="w-full h-[260px]" id="chart-custom-sector-turnover"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
 
                 <!-- 🌌 四象限星图 & 🗓️ 资金强度热力矩阵 -->
                 <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
@@ -2660,6 +2769,41 @@
                 let chartRrgInstance = null;
                 let chartHeatmapInstance = null;
 
+                // 2b. 指定板块资金流向 state
+                const getTodayStr = () => {
+                    const d = new Date();
+                    const year = d.getFullYear();
+                    const month = String(d.getMonth() + 1).padStart(2, '0');
+                    const day = String(d.getDate()).padStart(2, '0');
+                    return `${year}-${month}-${day}`;
+                };
+
+                const getPastDateStr = (daysAgo) => {
+                    const d = new Date();
+                    d.setDate(d.getDate() - daysAgo);
+                    const year = d.getFullYear();
+                    const month = String(d.getMonth() + 1).padStart(2, '0');
+                    const day = String(d.getDate()).padStart(2, '0');
+                    return `${year}-${month}-${day}`;
+                };
+
+                const mainFlowStartDate = ref(getPastDateStr(45));
+                const mainFlowEndDate = ref(getTodayStr());
+                const mainFlowLoading = ref(false);
+                const isFirstFlowLoad = ref(true);
+
+                const customSectorStartDate = ref(getPastDateStr(45).substring(0, 7));
+                const customSectorEndDate = ref(getTodayStr().substring(0, 7));
+                const customSectorMetric = ref("ratio");
+                const sectorSearchQuery = ref("");
+                const showSectorSuggestions = ref(false);
+                const suggestedSectors = ref([]);
+                const selectedSectors = ref([]);
+                const customSectorLoading = ref(false);
+                const customSectorError = ref("");
+                let chartCustomSectorFlowInstance = null;
+                let chartCustomSectorTurnoverInstance = null;
+
                 // 3. 数据中心 state
                 const syncStatus = ref({ active: false, progress: 0, logs: "" });
                 const queryKeyword = ref("");
@@ -3428,6 +3572,7 @@
                     if (tab === 'analysis') {
                         nextTick(() => {
                             initFlowChart();
+                            initCustomSectorFlowChart();
                         });
                     } else if (tab === 'overview') {
                         nextTick(() => {
@@ -3634,6 +3779,317 @@
                     chartFlowInstance.setOption(option, true);
                     initRrgCometChart();
                     initFlowHeatmapChart();
+                };
+
+                // 新增：指定板块资金流向 logic
+                const onSectorSearchInput = async () => {
+                    const q = sectorSearchQuery.value.trim();
+                    if (!q) {
+                        suggestedSectors.value = [];
+                        showSectorSuggestions.value = false;
+                        return;
+                    }
+                    try {
+                        const response = await fetch(`/api/market/sector_search?q=${encodeURIComponent(q)}`);
+                        const data = await response.json();
+                        if (data.status === 'success') {
+                            suggestedSectors.value = data.results;
+                            showSectorSuggestions.value = data.results.length > 0;
+                        } else {
+                            suggestedSectors.value = [];
+                            showSectorSuggestions.value = false;
+                        }
+                    } catch (e) {
+                        suggestedSectors.value = [];
+                        showSectorSuggestions.value = false;
+                    }
+                };
+
+                const selectSectorSuggestion = (sec) => {
+                    if (selectedSectors.value.some(s => s.name === sec.name)) {
+                        customSectorError.value = "该板块已在对比列表中";
+                        sectorSearchQuery.value = "";
+                        showSectorSuggestions.value = false;
+                        return;
+                    }
+                    if (selectedSectors.value.length >= 5) {
+                        customSectorError.value = "最多只能添加 5 个对比板块";
+                        sectorSearchQuery.value = "";
+                        showSectorSuggestions.value = false;
+                        return;
+                    }
+                    customSectorError.value = "";
+                    selectedSectors.value.push(sec);
+                    sectorSearchQuery.value = "";
+                    showSectorSuggestions.value = false;
+                    fetchCustomSectorFlowData();
+                };
+
+                const removeSelectedSector = (sec) => {
+                    selectedSectors.value = selectedSectors.value.filter(s => s.name !== sec.name);
+                    initCustomSectorFlowChart();
+                };
+
+                const hideSectorSuggestionsWithDelay = () => {
+                    setTimeout(() => {
+                        showSectorSuggestions.value = false;
+                    }, 200);
+                };
+
+                const sectorFlowCache = {};
+
+                const fetchCustomSectorFlowData = async () => {
+                    if (selectedSectors.value.length === 0) {
+                        initCustomSectorFlowChart();
+                        return;
+                    }
+
+                    customSectorLoading.value = true;
+                    customSectorError.value = "";
+                    const start = customSectorStartDate.value;
+                    const end = customSectorEndDate.value;
+
+                    try {
+                        const promises = selectedSectors.value.map(async (sec) => {
+                            const cacheKey = `${sec.name}_${sec.type}_${start}_${end}`;
+                            if (sectorFlowCache[cacheKey]) {
+                                return { name: sec.name, data: sectorFlowCache[cacheKey] };
+                            }
+
+                            const res = await fetch(`/api/market/custom_sector_flow?sector_name=${encodeURIComponent(sec.name)}&type=${sec.type}&start_date=${start}&end_date=${end}`);
+                            if (!res.ok) {
+                                throw new Error(`获取 ${sec.name} 数据失败`);
+                            }
+                            const result = await res.json();
+                            if (result.status === "success") {
+                                sectorFlowCache[cacheKey] = result.data;
+                                return { name: sec.name, data: result.data };
+                            } else {
+                                throw new Error(result.message || `获取 ${sec.name} 数据失败`);
+                            }
+                        });
+
+                        const results = await Promise.all(promises);
+                        results.forEach(res => {
+                            const sec = selectedSectors.value.find(s => s.name === res.name);
+                            if (sec) {
+                                sec.flowData = res.data;
+                            }
+                        });
+
+                        initCustomSectorFlowChart();
+                    } catch (e) {
+                        console.error("加载指定板块资金流向数据失败:", e);
+                        customSectorError.value = e.message || "加载板块数据失败，请重试";
+                    } finally {
+                        customSectorLoading.value = false;
+                    }
+                };
+
+                const initCustomSectorFlowChart = () => {
+                    // 1. 资金流向折线图
+                    const domFlow = document.getElementById("chart-custom-sector-flow");
+                    if (domFlow) {
+                        if (!chartCustomSectorFlowInstance) {
+                            chartCustomSectorFlowInstance = echarts.init(domFlow);
+                            window.addEventListener('resize', () => {
+                                if (chartCustomSectorFlowInstance) chartCustomSectorFlowInstance.resize();
+                            });
+                        }
+                        if (selectedSectors.value.length === 0) {
+                            chartCustomSectorFlowInstance.clear();
+                        } else {
+                            drawFlowChart();
+                        }
+                    }
+
+                    // 2. 换手率折线图
+                    const domTurnover = document.getElementById("chart-custom-sector-turnover");
+                    if (domTurnover) {
+                        if (!chartCustomSectorTurnoverInstance) {
+                            chartCustomSectorTurnoverInstance = echarts.init(domTurnover);
+                            window.addEventListener('resize', () => {
+                                if (chartCustomSectorTurnoverInstance) chartCustomSectorTurnoverInstance.resize();
+                            });
+                        }
+                        if (selectedSectors.value.length === 0) {
+                            chartCustomSectorTurnoverInstance.clear();
+                        } else {
+                            drawTurnoverChart();
+                        }
+                    }
+                };
+
+                const drawFlowChart = () => {
+                    const firstValidSec = selectedSectors.value.find(s => s.flowData && s.flowData.dates && s.flowData.dates.length > 0);
+                    if (!firstValidSec) return;
+
+                    const dates = firstValidSec.flowData.dates;
+                    const metric = customSectorMetric.value;
+                    const seriesList = [];
+
+                    selectedSectors.value.forEach(sec => {
+                        if (!sec.flowData || !sec.flowData.series || sec.flowData.series.length === 0) return;
+                        const item = sec.flowData.series[0];
+                        const chartData = metric === "ratio" ? item.ratio : item.amount;
+                        
+                        // 动态计算顶背离与底背离标记数据点
+                        const markPoints = [];
+                        const topDivs = item.top_divergence || [];
+                        const bottomDivs = item.bottom_divergence || [];
+                        
+                        for (let i = 0; i < dates.length; i++) {
+                            if (topDivs[i]) {
+                                markPoints.push({
+                                    name: '资金顶背离',
+                                    value: '⚠️顶背离',
+                                    coord: [dates[i], chartData[i]],
+                                    symbol: 'pin',
+                                    symbolSize: 32,
+                                    itemStyle: { color: '#f43f5e' }, // 玫瑰红背离标
+                                    label: { show: false }
+                                });
+                            } else if (bottomDivs[i]) {
+                                markPoints.push({
+                                    name: '资金底背离',
+                                    value: '🚀底背离',
+                                    coord: [dates[i], chartData[i]],
+                                    symbol: 'pin',
+                                    symbolSize: 32,
+                                    itemStyle: { color: '#10b981' }, // 翡翠绿底背离
+                                    label: { show: false }
+                                });
+                            }
+                        }
+
+                        seriesList.push({
+                            name: sec.name,
+                            type: "line",
+                            data: chartData,
+                            smooth: true,
+                            showSymbol: false,
+                            lineStyle: { width: 2 },
+                            emphasis: { focus: "series", lineStyle: { width: 3.5 } },
+                            markPoint: {
+                                data: markPoints,
+                                tooltip: {
+                                    formatter: (params) => {
+                                        return `<div class="font-bold text-xs p-1" style="color: ${params.color};">` +
+                                               `${params.name === '资金顶背离' ? '⚠️ 顶背离警告' : '🚀 底背离提示'}<br/>` +
+                                               `<span class="text-cyber-textMuted font-normal text-[10px]">${params.data.coord[0]} 收盘价创段新高/新低，但主力资金曲线未能跟随同步创高/创低，注意变盘！</span>` +
+                                               `</div>`;
+                                    }
+                                }
+                            }
+                        });
+                    });
+
+                    const option = {
+                        backgroundColor: 'transparent',
+                        tooltip: {
+                            trigger: 'axis',
+                            axisPointer: { type: 'cross', label: { backgroundColor: '#1f2937' } },
+                            backgroundColor: 'rgba(13, 20, 35, 0.9)',
+                            borderColor: 'rgba(255, 255, 255, 0.1)',
+                            textStyle: { color: '#f3f4f6', fontSize: 11 }
+                        },
+                        legend: {
+                            data: selectedSectors.value.map(s => s.name),
+                            textStyle: { color: '#9ca3af', fontSize: 9 },
+                            type: 'scroll',
+                            bottom: 0,
+                            padding: [10, 0, 0, 0]
+                        },
+                        grid: { left: '3%', right: '4%', bottom: '15%', top: '8%', containLabel: true },
+                        xAxis: {
+                            type: 'category',
+                            boundaryGap: false,
+                            data: dates,
+                            axisLabel: { color: '#9ca3af', fontSize: 9 },
+                            axisLine: { lineStyle: { color: 'rgba(255, 255, 255, 0.08)' } }
+                        },
+                        yAxis: {
+                            type: 'value',
+                            name: metric === "ratio" ? "资金占比 (%)" : "交易金额 (亿元)",
+                            nameTextStyle: { color: '#9ca3af', fontSize: 9 },
+                            axisLabel: { color: '#9ca3af', fontSize: 9, formatter: metric === "ratio" ? '{value}%' : '{value} 亿' },
+                            splitLine: { lineStyle: { color: 'rgba(255, 255, 255, 0.03)' } }
+                        },
+                        color: [
+                            '#06b6d4', '#8b5cf6', '#10b981', '#f59e0b', '#ec4899',
+                            '#3b82f6', '#f97316', '#ef4444', '#6366f1', '#d946ef'
+                        ],
+                        series: seriesList
+                    };
+                    chartCustomSectorFlowInstance.setOption(option, true);
+                };
+
+                const drawTurnoverChart = () => {
+                    const firstValidSec = selectedSectors.value.find(s => s.flowData && s.flowData.dates && s.flowData.dates.length > 0);
+                    if (!firstValidSec) return;
+
+                    const dates = firstValidSec.flowData.dates;
+                    const seriesList = [];
+
+                    selectedSectors.value.forEach(sec => {
+                        if (!sec.flowData || !sec.flowData.series || sec.flowData.series.length === 0) return;
+                        const item = sec.flowData.series[0];
+                        const turnoverData = item.turnover || [];
+                        
+                        seriesList.push({
+                            name: sec.name,
+                            type: "line",
+                            data: turnoverData,
+                            smooth: true,
+                            showSymbol: false,
+                            lineStyle: { width: 2 },
+                            emphasis: { focus: "series", lineStyle: { width: 3.5 } }
+                        });
+                    });
+
+                    const option = {
+                        backgroundColor: 'transparent',
+                        tooltip: {
+                            trigger: 'axis',
+                            axisPointer: { type: 'cross', label: { backgroundColor: '#1f2937' } },
+                            backgroundColor: 'rgba(13, 20, 35, 0.9)',
+                            borderColor: 'rgba(255, 255, 255, 0.1)',
+                            textStyle: { color: '#f3f4f6', fontSize: 11 }
+                        },
+                        legend: {
+                            data: selectedSectors.value.map(s => s.name),
+                            textStyle: { color: '#9ca3af', fontSize: 9 },
+                            type: 'scroll',
+                            bottom: 0,
+                            padding: [10, 0, 0, 0]
+                        },
+                        grid: { left: '3%', right: '4%', bottom: '15%', top: '8%', containLabel: true },
+                        xAxis: {
+                            type: 'category',
+                            boundaryGap: false,
+                            data: dates,
+                            axisLabel: { color: '#9ca3af', fontSize: 9 },
+                            axisLine: { lineStyle: { color: 'rgba(255, 255, 255, 0.08)' } }
+                        },
+                        yAxis: {
+                            type: 'value',
+                            name: "日均换手率 (%)",
+                            nameTextStyle: { color: '#9ca3af', fontSize: 9 },
+                            axisLabel: { color: '#9ca3af', fontSize: 9, formatter: '{value}%' },
+                            splitLine: { lineStyle: { color: 'rgba(255, 255, 255, 0.03)' } }
+                        },
+                        color: [
+                            '#06b6d4', '#8b5cf6', '#10b981', '#f59e0b', '#ec4899',
+                            '#3b82f6', '#f97316', '#ef4444', '#6366f1', '#d946ef'
+                        ],
+                        series: seriesList
+                    };
+                    chartCustomSectorTurnoverInstance.setOption(option, true);
+                };
+
+                const switchCustomFlowMetric = (metric) => {
+                    customSectorMetric.value = metric;
+                    initCustomSectorFlowChart();
                 };
 
                 const initRrgCometChart = () => {
@@ -4099,10 +4555,8 @@
                 };
 
                 const fetchCustomFlowData = async () => {
-                    if (parseInt(currentFlowLimit.value) === 30) {
-                        customFlowData.value = null;
-                        initFlowChart();
-                        return;
+                    if (!isFirstFlowLoad.value) {
+                        mainFlowLoading.value = true;
                     }
                     const limit = currentFlowLimit.value;
                     const type = currentFlowType.value;
@@ -4118,17 +4572,15 @@
                         }
                     } catch (e) {
                         console.error("加载自定义板块资金流向数据失败:", e);
+                    } finally {
+                        mainFlowLoading.value = false;
+                        isFirstFlowLoad.value = false;
                     }
                 };
 
                 const switchFlowType = (type) => {
                     currentFlowType.value = type;
-                    if (parseInt(currentFlowLimit.value) !== 30) {
-                        fetchCustomFlowData();
-                    } else {
-                        customFlowData.value = null;
-                        initFlowChart();
-                    }
+                    fetchCustomFlowData();
                 };
 
                 const switchFlowMetric = (metric) => {
@@ -4542,6 +4994,7 @@
 
                 onMounted(async () => {
                     await loadMarketData();
+                    await fetchCustomFlowData();
                     await loadStrategiesList();
                     await loadReportsList();
                     loadHighFreqFactors();
@@ -4593,6 +5046,27 @@
                     fetchCustomFlowData,
                     switchFlowType,
                     switchFlowMetric,
+                    
+                    // 新增：指定板块资金流向
+                    mainFlowStartDate,
+                    mainFlowEndDate,
+                    mainFlowLoading,
+                    customSectorStartDate,
+                    customSectorEndDate,
+                    customSectorMetric,
+                    sectorSearchQuery,
+                    showSectorSuggestions,
+                    suggestedSectors,
+                    selectedSectors,
+                    customSectorLoading,
+                    customSectorError,
+                    onSectorSearchInput,
+                    selectSectorSuggestion,
+                    hideSectorSuggestionsWithDelay,
+                    removeSelectedSector,
+                    fetchCustomSectorFlowData,
+                    initCustomSectorFlowChart,
+                    switchCustomFlowMetric,
                     expandedIndustries,
                     expandedConcepts,
                     toggleIndustry,
